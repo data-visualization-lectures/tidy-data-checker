@@ -1,0 +1,150 @@
+import { useState, useCallback } from 'react';
+import type { Table, Finding, HistoryEntry, CheckContext, Fix } from '../types';
+import { checks } from '../checks';
+
+interface TableState {
+  fileName: string | null;
+  encoding: string;
+  hasBom: boolean;
+  table: Table | null;
+  history: HistoryEntry[];
+  findings: Finding[];
+  selectedFinding: Finding | null;
+  pendingFix: {
+    finding: Finding;
+    previewTable: Table;
+  } | null;
+}
+
+const initialState: TableState = {
+  fileName: null,
+  encoding: '',
+  hasBom: false,
+  table: null,
+  history: [],
+  findings: [],
+  selectedFinding: null,
+  pendingFix: null,
+};
+
+export function useTableState() {
+  const [state, setState] = useState<TableState>(initialState);
+
+  const runChecks = useCallback((table: Table, ctx: CheckContext): Finding[] => {
+    const allFindings: Finding[] = [];
+    for (const check of checks) {
+      const findings = check.detect(table, ctx);
+      allFindings.push(...findings);
+    }
+    return allFindings;
+  }, []);
+
+  const setTable = useCallback((
+    table: Table,
+    fileName: string,
+    encoding: string,
+    hasBom: boolean
+  ) => {
+    const ctx: CheckContext = { fileName, encoding, hasBom };
+    const findings = runChecks(table, ctx);
+
+    setState({
+      fileName,
+      encoding,
+      hasBom,
+      table,
+      history: [],
+      findings,
+      selectedFinding: null,
+      pendingFix: null,
+    });
+  }, [runChecks]);
+
+  const selectFinding = useCallback((finding: Finding | null) => {
+    setState(prev => ({ ...prev, selectedFinding: finding, pendingFix: null }));
+  }, []);
+
+  const previewFix = useCallback((finding: Finding) => {
+    if (!finding.fix || !state.table) return;
+
+    const previewTable = finding.fix.apply(state.table);
+    setState(prev => ({
+      ...prev,
+      pendingFix: { finding, previewTable },
+    }));
+  }, [state.table]);
+
+  const applyFix = useCallback(() => {
+    if (!state.pendingFix || !state.table) return;
+
+    const { finding, previewTable } = state.pendingFix;
+    const fix = finding.fix as Fix;
+
+    const historyEntry: HistoryEntry = {
+      table: state.table,
+      appliedFix: {
+        checkId: finding.checkId,
+        fixDescription: fix.description,
+        timestamp: Date.now(),
+      },
+    };
+
+    const ctx: CheckContext = {
+      fileName: state.fileName || '',
+      encoding: state.encoding,
+      hasBom: state.hasBom,
+    };
+    const newFindings = runChecks(previewTable, ctx);
+
+    setState(prev => ({
+      ...prev,
+      table: previewTable,
+      history: [...prev.history, historyEntry],
+      findings: newFindings,
+      selectedFinding: null,
+      pendingFix: null,
+    }));
+  }, [state, runChecks]);
+
+  const cancelFix = useCallback(() => {
+    setState(prev => ({ ...prev, pendingFix: null }));
+  }, []);
+
+  const undo = useCallback(() => {
+    if (state.history.length === 0) return;
+
+    const newHistory = [...state.history];
+    const lastEntry = newHistory.pop()!;
+
+    const ctx: CheckContext = {
+      fileName: state.fileName || '',
+      encoding: state.encoding,
+      hasBom: state.hasBom,
+    };
+    const newFindings = runChecks(lastEntry.table, ctx);
+
+    setState(prev => ({
+      ...prev,
+      table: lastEntry.table,
+      history: newHistory,
+      findings: newFindings,
+      selectedFinding: null,
+      pendingFix: null,
+    }));
+  }, [state.history, state.fileName, state.encoding, state.hasBom, runChecks]);
+
+  const reset = useCallback(() => {
+    setState(initialState);
+  }, []);
+
+  return {
+    ...state,
+    setTable,
+    selectFinding,
+    previewFix,
+    applyFix,
+    cancelFix,
+    undo,
+    reset,
+  };
+}
