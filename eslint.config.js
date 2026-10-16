@@ -27,6 +27,10 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_' },
       ],
+      'no-irregular-whitespace': [
+        'error',
+        { skipStrings: true, skipRegExps: true },
+      ],
     },
   },
 )
