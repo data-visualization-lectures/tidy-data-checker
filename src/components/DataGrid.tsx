@@ -6,6 +6,7 @@ interface DataGridProps {
   table: Table;
   highlightRanges?: CellRange[];
   previewTable?: Table | null;
+  onCellClick?: (row: number, col: number, value: string) => void;
 }
 
 function isCellInRange(row: number, col: number, range: CellRange): boolean {
@@ -21,7 +22,7 @@ function isCellHighlighted(row: number, col: number, ranges: CellRange[]): boole
   return ranges.some(range => isCellInRange(row, col, range));
 }
 
-export function DataGrid({ table, highlightRanges = [], previewTable }: DataGridProps) {
+export function DataGrid({ table, highlightRanges = [], previewTable, onCellClick }: DataGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const displayTable = previewTable || table;
 
@@ -74,6 +75,7 @@ export function DataGrid({ table, highlightRanges = [], previewTable }: DataGrid
                     id={`cell-${rowIndex}-${colIndex}`}
                     className={`data-cell ${isHighlighted ? 'highlighted' : ''} ${isPreview ? 'preview' : ''}`}
                     title={value}
+                    onClick={() => onCellClick?.(rowIndex, colIndex, value)}
                   >
                     {value}
                   </td>

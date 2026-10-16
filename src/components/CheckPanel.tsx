@@ -1,12 +1,13 @@
 import type { Finding } from '../types';
 import { FindingItem } from './FindingItem';
-import { checks } from '../checks';
+import { checkpointRegistry } from '../checks';
 
 interface CheckPanelProps {
   findings: Finding[];
   selectedFinding: Finding | null;
   onSelectFinding: (finding: Finding | null) => void;
   onPreviewFix: (finding: Finding) => void;
+  filterCheckpointId?: string | null;
 }
 
 export function CheckPanel({
@@ -14,21 +15,33 @@ export function CheckPanel({
   selectedFinding,
   onSelectFinding,
   onPreviewFix,
+  filterCheckpointId,
 }: CheckPanelProps) {
-  const findingsByCheck = checks.map(check => ({
-    check,
-    findings: findings.filter(f => f.checkId === check.id),
+  const implementedCheckpoints = checkpointRegistry.filter(cp => cp.check !== null);
+
+  const filteredCheckpoints = filterCheckpointId
+    ? implementedCheckpoints.filter(cp => cp.id === filterCheckpointId)
+    : implementedCheckpoints;
+
+  const findingsByCheck = filteredCheckpoints.map(cp => ({
+    checkpoint: cp,
+    findings: findings.filter(f => f.checkId === cp.id),
   }));
 
   return (
     <div className="check-panel">
-      <h2 className="check-panel-title">チェック結果</h2>
+      <h2 className="check-panel-title">
+        チェック結果
+        {filterCheckpointId && (
+          <span className="filter-indicator">（フィルター中）</span>
+        )}
+      </h2>
 
-      {findingsByCheck.map(({ check, findings: checkFindings }) => (
-        <div key={check.id} className="check-section">
+      {findingsByCheck.map(({ checkpoint, findings: checkFindings }) => (
+        <div key={checkpoint.id} className="check-section">
           <div className="check-header">
-            <h3 className="check-title">{check.title}</h3>
-            <p className="check-description">{check.description}</p>
+            <h3 className="check-title">{checkpoint.name}</h3>
+            <p className="check-description">{checkpoint.description}</p>
           </div>
 
           <div className="findings-list">
