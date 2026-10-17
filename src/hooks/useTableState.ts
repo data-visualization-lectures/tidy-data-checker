@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useRef } from 'react';
 import type { Table, Finding, HistoryEntry, CheckContext, Fix, SheetInfo, MergedCell, CheckpointState } from '../types';
 import { checks } from '../checks';
 import { deriveAllCheckpointStates, buildFixHistory, type FixHistory } from '../utils/checkpointStatus';
+import { adjustMergedCellsForDeletedRows, adjustMergedCellsForDeletedCols } from '../utils/mergedCells';
 
 interface TableState {
   fileName: string | null;
@@ -127,6 +128,7 @@ export function useTableState() {
 
     const historyEntry: HistoryEntry = {
       table: state.table,
+      mergedCells: state.mergedCells,
       appliedFix: {
         checkId: finding.checkId,
         fixDescription: fix.description,
@@ -134,13 +136,21 @@ export function useTableState() {
       },
     };
 
+    let updatedMergedCells = state.mergedCells;
+    if (fix.deletedRows && fix.deletedRows.length > 0 && updatedMergedCells) {
+      updatedMergedCells = adjustMergedCellsForDeletedRows(updatedMergedCells, fix.deletedRows);
+    }
+    if (fix.deletedCols && fix.deletedCols.length > 0 && updatedMergedCells) {
+      updatedMergedCells = adjustMergedCellsForDeletedCols(updatedMergedCells, fix.deletedCols);
+    }
+
     const ctx: CheckContext = {
       fileName: state.fileName || '',
       encoding: state.encoding,
       hasBom: state.hasBom,
       sheetName: state.sheetName,
       sheets: state.sheets,
-      mergedCells: state.mergedCells,
+      mergedCells: updatedMergedCells,
       delimiter: state.delimiter,
     };
     const newFindings = runChecks(previewTable, ctx);
@@ -152,6 +162,7 @@ export function useTableState() {
       findings: newFindings,
       selectedFinding: null,
       pendingFix: null,
+      mergedCells: updatedMergedCells,
       tableVersion: prev.tableVersion + 1,
     }));
   }, [state, runChecks]);
@@ -166,13 +177,15 @@ export function useTableState() {
     const newHistory = [...state.history];
     const lastEntry = newHistory.pop()!;
 
+    const restoredMergedCells = lastEntry.mergedCells;
+
     const ctx: CheckContext = {
       fileName: state.fileName || '',
       encoding: state.encoding,
       hasBom: state.hasBom,
       sheetName: state.sheetName,
       sheets: state.sheets,
-      mergedCells: state.mergedCells,
+      mergedCells: restoredMergedCells,
       delimiter: state.delimiter,
     };
     const newFindings = runChecks(lastEntry.table, ctx);
@@ -184,9 +197,10 @@ export function useTableState() {
       findings: newFindings,
       selectedFinding: null,
       pendingFix: null,
+      mergedCells: restoredMergedCells,
       tableVersion: prev.tableVersion + 1,
     }));
-  }, [state.history, state.fileName, state.encoding, state.hasBom, state.sheetName, state.sheets, state.mergedCells, state.delimiter, runChecks]);
+  }, [state.history, state.fileName, state.encoding, state.hasBom, state.sheetName, state.sheets, state.delimiter, runChecks]);
 
   const reset = useCallback(() => {
     setState(initialState);
