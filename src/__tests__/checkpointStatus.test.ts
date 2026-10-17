@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveCheckpointStatus, deriveAllCheckpointStates, getStatusLabel } from '../utils/checkpointStatus';
+import { deriveCheckpointStatus, deriveAllCheckpointStates, getStatusLabel, buildFixHistory } from '../utils/checkpointStatus';
 import type { Finding } from '../types';
 
 describe('deriveCheckpointStatus', () => {
@@ -8,7 +8,12 @@ describe('deriveCheckpointStatus', () => {
     expect(status).toEqual({ type: 'unimplemented' });
   });
 
-  it('should return ok when no problems found', () => {
+  it('should return ok with hasInfo false when no findings', () => {
+    const status = deriveCheckpointStatus('encoding', [], true);
+    expect(status).toEqual({ type: 'ok', hasInfo: false });
+  });
+
+  it('should return ok with hasInfo true when only info findings exist', () => {
     const findings: Finding[] = [
       {
         checkId: 'encoding',
@@ -19,10 +24,10 @@ describe('deriveCheckpointStatus', () => {
     ];
 
     const status = deriveCheckpointStatus('encoding', findings, true);
-    expect(status).toEqual({ type: 'ok' });
+    expect(status).toEqual({ type: 'ok', hasInfo: true });
   });
 
-  it('should return found with count when problems exist', () => {
+  it('should return found with count when actionable problems exist', () => {
     const findings: Finding[] = [
       {
         checkId: 'empty',
@@ -44,7 +49,7 @@ describe('deriveCheckpointStatus', () => {
     expect(status).toEqual({ type: 'found', count: 2 });
   });
 
-  it('should count only warnings and errors as problems', () => {
+  it('should not count warnings without fix as actionable', () => {
     const findings: Finding[] = [
       {
         checkId: 'encoding',
@@ -54,14 +59,45 @@ describe('deriveCheckpointStatus', () => {
       },
       {
         checkId: 'encoding',
-        severity: 'error',
+        severity: 'warning',
         ranges: [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }],
         message: '文字化けを検出',
       },
     ];
 
     const status = deriveCheckpointStatus('encoding', findings, true);
+    expect(status).toEqual({ type: 'ok', hasInfo: true });
+  });
+
+  it('should count warnings with fix as actionable', () => {
+    const findings: Finding[] = [
+      {
+        checkId: 'empty',
+        severity: 'warning',
+        ranges: [],
+        message: '空行',
+        fix: { description: '削除', apply: t => t },
+      },
+    ];
+
+    const status = deriveCheckpointStatus('empty', findings, true);
     expect(status).toEqual({ type: 'found', count: 1 });
+  });
+
+  it('should return fixed when had fixable findings but now none', () => {
+    const findings: Finding[] = [
+      {
+        checkId: 'empty',
+        severity: 'info',
+        ranges: [],
+        message: '空行・空列は見つかりませんでした',
+      },
+    ];
+
+    const fixHistory = { empty: 2 };
+
+    const status = deriveCheckpointStatus('empty', findings, true, fixHistory);
+    expect(status).toEqual({ type: 'fixed' });
   });
 
   it('should return ok when checkpoint has no findings', () => {
@@ -71,11 +107,12 @@ describe('deriveCheckpointStatus', () => {
         severity: 'warning',
         ranges: [],
         message: 'Other issue',
+        fix: { description: 'Fix', apply: t => t },
       },
     ];
 
     const status = deriveCheckpointStatus('encoding', findings, true);
-    expect(status).toEqual({ type: 'ok' });
+    expect(status).toEqual({ type: 'ok', hasInfo: false });
   });
 });
 
@@ -116,14 +153,67 @@ describe('deriveAllCheckpointStates', () => {
     const states = deriveAllCheckpointStates(findings);
     const empty = states.find(s => s.id === 'empty');
     
-    expect(empty?.findingCount).toBe(1);
-    expect(empty?.fixableCount).toBe(1);
+    expect(empty?.actionableCount).toBe(1);
+    expect(empty?.infoCount).toBe(1);
+  });
+
+  it('should show fixed status when fix history exists but no current actionable', () => {
+    const findings: Finding[] = [
+      {
+        checkId: 'empty',
+        severity: 'info',
+        ranges: [],
+        message: '空行・空列は見つかりませんでした',
+      },
+    ];
+
+    const fixHistory = { empty: 1 };
+    const states = deriveAllCheckpointStates(findings, fixHistory);
+    const empty = states.find(s => s.id === 'empty');
+    
+    expect(empty?.status.type).toBe('fixed');
+  });
+});
+
+describe('buildFixHistory', () => {
+  it('should count actionable findings per checkpoint', () => {
+    const findings: Finding[] = [
+      {
+        checkId: 'empty',
+        severity: 'warning',
+        ranges: [],
+        message: '空行',
+        fix: { description: '削除', apply: t => t },
+      },
+      {
+        checkId: 'empty',
+        severity: 'warning',
+        ranges: [],
+        message: '空列',
+        fix: { description: '削除', apply: t => t },
+      },
+      {
+        checkId: 'encoding',
+        severity: 'info',
+        ranges: [],
+        message: 'UTF-8',
+      },
+    ];
+
+    const history = buildFixHistory(findings);
+    
+    expect(history['empty']).toBe(2);
+    expect(history['encoding']).toBeUndefined();
   });
 });
 
 describe('getStatusLabel', () => {
-  it('should return ○ for ok', () => {
-    expect(getStatusLabel({ type: 'ok' })).toBe('○');
+  it('should return ○ for ok without info', () => {
+    expect(getStatusLabel({ type: 'ok', hasInfo: false })).toBe('○');
+  });
+
+  it('should return ○ 情報 for ok with info', () => {
+    expect(getStatusLabel({ type: 'ok', hasInfo: true })).toBe('○ 情報');
   });
 
   it('should return count with 件 for found', () => {

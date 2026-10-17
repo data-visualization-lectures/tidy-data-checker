@@ -73,7 +73,7 @@ export interface HistoryEntry {
 }
 
 export type CheckpointStatus = 
-  | { type: 'ok' }
+  | { type: 'ok'; hasInfo: boolean }
   | { type: 'found'; count: number }
   | { type: 'fixed' }
   | { type: 'unimplemented' };
@@ -83,8 +83,8 @@ export interface CheckpointState {
   name: string;
   description: string;
   status: CheckpointStatus;
-  findingCount: number;
-  fixableCount: number;
+  actionableCount: number;
+  infoCount: number;
   implemented: boolean;
 }
 

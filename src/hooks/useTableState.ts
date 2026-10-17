@@ -1,7 +1,7 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import type { Table, Finding, HistoryEntry, CheckContext, Fix, SheetInfo, MergedCell, CheckpointState } from '../types';
 import { checks } from '../checks';
-import { deriveAllCheckpointStates } from '../utils/checkpointStatus';
+import { deriveAllCheckpointStates, buildFixHistory, type FixHistory } from '../utils/checkpointStatus';
 
 interface TableState {
   fileName: string | null;
@@ -20,6 +20,7 @@ interface TableState {
   sheets?: SheetInfo[];
   mergedCells?: MergedCell[];
   delimiter?: string;
+  tableVersion: number;
 }
 
 const initialState: TableState = {
@@ -32,6 +33,7 @@ const initialState: TableState = {
   selectedFinding: null,
   selectedCheckpointId: null,
   pendingFix: null,
+  tableVersion: 0,
 };
 
 export interface SetTableOptions {
@@ -47,6 +49,7 @@ export interface SetTableOptions {
 
 export function useTableState() {
   const [state, setState] = useState<TableState>(initialState);
+  const fixHistoryRef = useRef<FixHistory>({});
 
   const runChecks = useCallback((table: Table, ctx: CheckContext): Finding[] => {
     const allFindings: Finding[] = [];
@@ -58,7 +61,7 @@ export function useTableState() {
   }, []);
 
   const checkpointStates = useMemo((): CheckpointState[] => {
-    return deriveAllCheckpointStates(state.findings);
+    return deriveAllCheckpointStates(state.findings, fixHistoryRef.current);
   }, [state.findings]);
 
   const filteredFindings = useMemo((): Finding[] => {
@@ -73,7 +76,9 @@ export function useTableState() {
     const ctx: CheckContext = { fileName, encoding, hasBom, sheetName, sheets, mergedCells, delimiter };
     const findings = runChecks(table, ctx);
 
-    setState({
+    fixHistoryRef.current = buildFixHistory(findings);
+
+    setState(prev => ({
       fileName,
       encoding,
       hasBom,
@@ -87,7 +92,8 @@ export function useTableState() {
       sheets,
       mergedCells,
       delimiter,
-    });
+      tableVersion: prev.tableVersion + 1,
+    }));
   }, [runChecks]);
 
   const selectFinding = useCallback((finding: Finding | null) => {
@@ -146,6 +152,7 @@ export function useTableState() {
       findings: newFindings,
       selectedFinding: null,
       pendingFix: null,
+      tableVersion: prev.tableVersion + 1,
     }));
   }, [state, runChecks]);
 
@@ -177,6 +184,7 @@ export function useTableState() {
       findings: newFindings,
       selectedFinding: null,
       pendingFix: null,
+      tableVersion: prev.tableVersion + 1,
     }));
   }, [state.history, state.fileName, state.encoding, state.hasBom, state.sheetName, state.sheets, state.mergedCells, state.delimiter, runChecks]);
 
@@ -198,3 +206,5 @@ export function useTableState() {
     reset,
   };
 }
+
+export type { FixHistory };

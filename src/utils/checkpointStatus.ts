@@ -1,10 +1,15 @@
 import type { Finding, CheckpointStatus, CheckpointState } from '../types';
 import { checkpointRegistry } from '../checks/registry';
 
+export interface FixHistory {
+  [checkpointId: string]: number;
+}
+
 export function deriveCheckpointStatus(
   checkpointId: string,
   findings: Finding[],
-  isImplemented: boolean
+  isImplemented: boolean,
+  fixHistory: FixHistory = {}
 ): CheckpointStatus {
   if (!isImplemented) {
     return { type: 'unimplemented' };
@@ -12,41 +17,45 @@ export function deriveCheckpointStatus(
 
   const checkFindings = findings.filter(f => f.checkId === checkpointId);
   
-  const problemFindings = checkFindings.filter(
-    f => f.severity === 'error' || f.severity === 'warning'
+  const actionableFindings = checkFindings.filter(
+    f => (f.severity === 'error' || f.severity === 'warning') && f.fix !== undefined
   );
   
-  const fixableFindings = problemFindings.filter(f => f.fix !== undefined);
+  const infoFindings = checkFindings.filter(f => f.severity === 'info');
+  const hasInfo = infoFindings.length > 0;
 
-  if (problemFindings.length === 0) {
-    return { type: 'ok' };
+  if (actionableFindings.length === 0) {
+    const hadFixableFindings = (fixHistory[checkpointId] || 0) > 0;
+    if (hadFixableFindings) {
+      return { type: 'fixed' };
+    }
+    return { type: 'ok', hasInfo };
   }
 
-  if (fixableFindings.length === 0 && problemFindings.length > 0) {
-    return { type: 'found', count: problemFindings.length };
-  }
-
-  return { type: 'found', count: problemFindings.length };
+  return { type: 'found', count: actionableFindings.length };
 }
 
-export function deriveAllCheckpointStates(findings: Finding[]): CheckpointState[] {
+export function deriveAllCheckpointStates(
+  findings: Finding[],
+  fixHistory: FixHistory = {}
+): CheckpointState[] {
   return checkpointRegistry.map(cp => {
     const isImplemented = cp.check !== null;
-    const status = deriveCheckpointStatus(cp.id, findings, isImplemented);
+    const status = deriveCheckpointStatus(cp.id, findings, isImplemented, fixHistory);
     
     const checkFindings = findings.filter(f => f.checkId === cp.id);
-    const problemFindings = checkFindings.filter(
-      f => f.severity === 'error' || f.severity === 'warning'
+    const actionableFindings = checkFindings.filter(
+      f => (f.severity === 'error' || f.severity === 'warning') && f.fix !== undefined
     );
-    const fixableFindings = problemFindings.filter(f => f.fix !== undefined);
+    const infoFindings = checkFindings.filter(f => f.severity === 'info');
 
     return {
       id: cp.id,
       name: cp.name,
       description: cp.description,
       status,
-      findingCount: problemFindings.length,
-      fixableCount: fixableFindings.length,
+      actionableCount: actionableFindings.length,
+      infoCount: infoFindings.length,
       implemented: isImplemented,
     };
   });
@@ -55,7 +64,7 @@ export function deriveAllCheckpointStates(findings: Finding[]): CheckpointState[
 export function getStatusLabel(status: CheckpointStatus): string {
   switch (status.type) {
     case 'ok':
-      return '○';
+      return status.hasInfo ? '○ 情報' : '○';
     case 'found':
       return `${status.count}件`;
     case 'fixed':
@@ -63,4 +72,14 @@ export function getStatusLabel(status: CheckpointStatus): string {
     case 'unimplemented':
       return '未実装';
   }
+}
+
+export function buildFixHistory(findings: Finding[]): FixHistory {
+  const history: FixHistory = {};
+  for (const finding of findings) {
+    if ((finding.severity === 'error' || finding.severity === 'warning') && finding.fix) {
+      history[finding.checkId] = (history[finding.checkId] || 0) + 1;
+    }
+  }
+  return history;
 }

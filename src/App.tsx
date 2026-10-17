@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { FileDropZone } from './components/FileDropZone';
 import { DataGrid } from './components/DataGrid';
 import { CheckPanel } from './components/CheckPanel';
@@ -29,6 +29,7 @@ function App() {
     pendingFix,
     sheetName,
     sheets,
+    tableVersion,
     setTable,
     selectFinding,
     selectCheckpoint,
@@ -46,6 +47,10 @@ function App() {
   } | null>(null);
 
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number; value: string } | null>(null);
+
+  useEffect(() => {
+    setSelectedCell(null);
+  }, [tableVersion]);
 
   const handleFileSelect = useCallback(async (file: File) => {
     try {

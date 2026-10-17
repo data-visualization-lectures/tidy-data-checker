@@ -23,7 +23,8 @@ export function ChecklistPanel({
           const statusLabel = getStatusLabel(cp.status);
           const isSelected = selectedCheckpointId === cp.id;
           const hasProblems = cp.status.type === 'found';
-          const isClickable = cp.implemented && cp.findingCount > 0;
+          const hasInfo = cp.status.type === 'ok' && cp.status.hasInfo;
+          const isClickable = cp.implemented && (cp.actionableCount > 0 || cp.infoCount > 0);
 
           return (
             <div
@@ -39,13 +40,13 @@ export function ChecklistPanel({
               <div className="checklist-item-content">
                 <div className="checklist-item-header">
                   <span className="checklist-item-name">{cp.name}</span>
-                  <span className={`checklist-item-status status-${cp.status.type}`}>
+                  <span className={`checklist-item-status status-${cp.status.type} ${hasInfo ? 'has-info' : ''}`}>
                     {statusLabel}
                   </span>
                 </div>
                 <p className="checklist-item-description">{cp.description}</p>
               </div>
-              {hasProblems && (
+              {(hasProblems || hasInfo) && (
                 <div className="checklist-item-indicator">▶</div>
               )}
             </div>
