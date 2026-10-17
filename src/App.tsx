@@ -1,12 +1,17 @@
-import { useCallback } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { FileDropZone } from './components/FileDropZone';
 import { DataGrid } from './components/DataGrid';
 import { CheckPanel } from './components/CheckPanel';
+import { ChecklistPanel } from './components/ChecklistPanel';
 import { ExportPanel } from './components/ExportPanel';
 import { FixPreview } from './components/FixPreview';
+import { SheetSelector } from './components/SheetSelector';
+import { CellDetail } from './components/CellDetail';
 import { useTableState } from './hooks/useTableState';
 import { readFileAsArrayBuffer, detectAndDecode } from './utils/decode';
-import { parseCSV } from './utils/csv';
+import { parseCSVWithMeta } from './utils/csv';
+import { isExcelFile, getExcelSheets, parseExcelSheet } from './utils/excel';
+import type { SheetInfo } from './types';
 import './App.css';
 
 function App() {
@@ -17,10 +22,17 @@ function App() {
     table,
     history,
     findings,
+    filteredFindings,
+    checkpointStates,
     selectedFinding,
+    selectedCheckpointId,
     pendingFix,
+    sheetName,
+    sheets,
+    tableVersion,
     setTable,
     selectFinding,
+    selectCheckpoint,
     previewFix,
     applyFix,
     cancelFix,
@@ -28,17 +40,76 @@ function App() {
     reset,
   } = useTableState();
 
+  const [pendingSheetSelection, setPendingSheetSelection] = useState<{
+    bytes: Uint8Array;
+    fileName: string;
+    sheets: SheetInfo[];
+  } | null>(null);
+
+  const [selectedCell, setSelectedCell] = useState<{ row: number; col: number; value: string } | null>(null);
+
+  useEffect(() => {
+    setSelectedCell(null);
+  }, [tableVersion]);
+
   const handleFileSelect = useCallback(async (file: File) => {
     try {
       const bytes = await readFileAsArrayBuffer(file);
-      const { text, encoding: detectedEncoding, hasBom: detectedBom } = detectAndDecode(bytes);
-      const parsedTable = parseCSV(text);
-      setTable(parsedTable, file.name, detectedEncoding, detectedBom);
+
+      if (isExcelFile(file.name)) {
+        const { sheets: excelSheets, defaultSheet } = getExcelSheets(bytes);
+        
+        if (excelSheets.length > 1) {
+          setPendingSheetSelection({ bytes, fileName: file.name, sheets: excelSheets });
+          return;
+        }
+
+        const parsed = parseExcelSheet(bytes, defaultSheet);
+        setTable({
+          table: parsed.table,
+          fileName: file.name,
+          encoding: 'Excel',
+          hasBom: false,
+          sheetName: parsed.sheetName,
+          sheets: parsed.sheets,
+          mergedCells: parsed.mergedCells,
+        });
+      } else {
+        const { text, encoding: detectedEncoding, hasBom: detectedBom } = detectAndDecode(bytes);
+        const parsed = parseCSVWithMeta(text);
+        setTable({
+          table: parsed.table,
+          fileName: file.name,
+          encoding: detectedEncoding,
+          hasBom: detectedBom,
+          delimiter: parsed.delimiter,
+        });
+      }
     } catch (error) {
       console.error('File read error:', error);
       alert('ファイルの読み込みに失敗しました。');
     }
   }, [setTable]);
+
+  const handleSheetSelect = useCallback((sheetName: string) => {
+    if (!pendingSheetSelection) return;
+
+    const parsed = parseExcelSheet(pendingSheetSelection.bytes, sheetName);
+    setTable({
+      table: parsed.table,
+      fileName: pendingSheetSelection.fileName,
+      encoding: 'Excel',
+      hasBom: false,
+      sheetName: parsed.sheetName,
+      sheets: parsed.sheets,
+      mergedCells: parsed.mergedCells,
+    });
+    setPendingSheetSelection(null);
+  }, [pendingSheetSelection, setTable]);
+
+  const handleCellClick = useCallback((row: number, col: number, value: string) => {
+    setSelectedCell({ row, col, value });
+  }, []);
 
   const highlightRanges = selectedFinding?.ranges ?? [];
 
@@ -56,8 +127,8 @@ function App() {
             <div className="welcome-info">
               <h2>使い方</h2>
               <ol>
-                <li>CSVファイルをドラッグ＆ドロップまたは選択</li>
-                <li>チェック結果を確認し、問題箇所をクリック</li>
+                <li>CSV/Excelファイルをドラッグ＆ドロップまたは選択</li>
+                <li>チェックリストで問題を確認</li>
                 <li>修正をプレビューして適用</li>
                 <li>UTF-8 CSVとしてエクスポート</li>
               </ol>
@@ -73,10 +144,14 @@ function App() {
                 <span className="file-name">{fileName}</span>
                 <span className="file-encoding">
                   {encoding}{hasBom ? '（BOM付き）' : ''}
+                  {sheetName && ` / シート: ${sheetName}`}
                 </span>
                 <span className="file-size">
                   {table.length} 行 × {Math.max(0, ...table.map(r => r.length))} 列
                 </span>
+                {sheets && sheets.length > 1 && (
+                  <span className="sheet-count">{sheets.length} シート</span>
+                )}
               </div>
               <ExportPanel
                 table={table}
@@ -88,26 +163,55 @@ function App() {
             </div>
 
             <div className="editor-body">
-              <div className="grid-panel">
-                <DataGrid
-                  table={table}
-                  highlightRanges={highlightRanges}
-                  previewTable={pendingFix?.previewTable}
+              <div className="checklist-sidebar">
+                <ChecklistPanel
+                  checkpoints={checkpointStates}
+                  findings={findings}
+                  selectedCheckpointId={selectedCheckpointId}
+                  onSelectCheckpoint={selectCheckpoint}
                 />
+              </div>
+
+              <div className="main-content">
+                <div className="grid-panel">
+                  <DataGrid
+                    table={table}
+                    highlightRanges={highlightRanges}
+                    previewTable={pendingFix?.previewTable}
+                    onCellClick={handleCellClick}
+                  />
+                  {selectedCell && (
+                    <CellDetail
+                      row={selectedCell.row}
+                      col={selectedCell.col}
+                      value={selectedCell.value}
+                      onClose={() => setSelectedCell(null)}
+                    />
+                  )}
+                </div>
               </div>
 
               <div className="side-panel">
                 <CheckPanel
-                  findings={findings}
+                  findings={filteredFindings}
                   selectedFinding={selectedFinding}
                   onSelectFinding={selectFinding}
                   onPreviewFix={previewFix}
+                  filterCheckpointId={selectedCheckpointId}
                 />
               </div>
             </div>
           </div>
         )}
       </main>
+
+      {pendingSheetSelection && (
+        <SheetSelector
+          sheets={pendingSheetSelection.sheets}
+          onSelect={handleSheetSelect}
+          onCancel={() => setPendingSheetSelection(null)}
+        />
+      )}
 
       {pendingFix && table && (
         <FixPreview

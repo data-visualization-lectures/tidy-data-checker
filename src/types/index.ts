@@ -7,6 +7,27 @@ export interface CellRange {
   endCol: number;
 }
 
+export interface MergedCell {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+}
+
+export interface SheetInfo {
+  name: string;
+  rowCount: number;
+  colCount: number;
+}
+
+export interface ParsedFile {
+  table: Table;
+  sheetName?: string;
+  sheets?: SheetInfo[];
+  mergedCells?: MergedCell[];
+  delimiter?: string;
+}
+
 export type Severity = 'error' | 'warning' | 'info';
 
 export interface Fix {
@@ -20,6 +41,7 @@ export interface Finding {
   ranges: CellRange[];
   message: string;
   fix?: Fix;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CheckContext {
@@ -27,6 +49,11 @@ export interface CheckContext {
   encoding: string;
   hasBom: boolean;
   rawBytes?: Uint8Array;
+  sheetName?: string;
+  sheets?: SheetInfo[];
+  mergedCells?: MergedCell[];
+  delimiter?: string;
+  detectedUnit?: string;
 }
 
 export interface Check {
@@ -43,6 +70,22 @@ export interface HistoryEntry {
     fixDescription: string;
     timestamp: number;
   };
+}
+
+export type CheckpointStatus = 
+  | { type: 'ok'; hasInfo: boolean }
+  | { type: 'found'; count: number }
+  | { type: 'fixed' }
+  | { type: 'unimplemented' };
+
+export interface CheckpointState {
+  id: string;
+  name: string;
+  description: string;
+  status: CheckpointStatus;
+  actionableCount: number;
+  infoCount: number;
+  implemented: boolean;
 }
 
 export interface AppState {

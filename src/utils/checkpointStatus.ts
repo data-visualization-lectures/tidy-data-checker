@@ -1,0 +1,85 @@
+import type { Finding, CheckpointStatus, CheckpointState } from '../types';
+import { checkpointRegistry } from '../checks/registry';
+
+export interface FixHistory {
+  [checkpointId: string]: number;
+}
+
+export function deriveCheckpointStatus(
+  checkpointId: string,
+  findings: Finding[],
+  isImplemented: boolean,
+  fixHistory: FixHistory = {}
+): CheckpointStatus {
+  if (!isImplemented) {
+    return { type: 'unimplemented' };
+  }
+
+  const checkFindings = findings.filter(f => f.checkId === checkpointId);
+  
+  const actionableFindings = checkFindings.filter(
+    f => (f.severity === 'error' || f.severity === 'warning') && f.fix !== undefined
+  );
+  
+  const infoFindings = checkFindings.filter(f => f.severity === 'info');
+  const hasInfo = infoFindings.length > 0;
+
+  if (actionableFindings.length === 0) {
+    const hadFixableFindings = (fixHistory[checkpointId] || 0) > 0;
+    if (hadFixableFindings) {
+      return { type: 'fixed' };
+    }
+    return { type: 'ok', hasInfo };
+  }
+
+  return { type: 'found', count: actionableFindings.length };
+}
+
+export function deriveAllCheckpointStates(
+  findings: Finding[],
+  fixHistory: FixHistory = {}
+): CheckpointState[] {
+  return checkpointRegistry.map(cp => {
+    const isImplemented = cp.check !== null;
+    const status = deriveCheckpointStatus(cp.id, findings, isImplemented, fixHistory);
+    
+    const checkFindings = findings.filter(f => f.checkId === cp.id);
+    const actionableFindings = checkFindings.filter(
+      f => (f.severity === 'error' || f.severity === 'warning') && f.fix !== undefined
+    );
+    const infoFindings = checkFindings.filter(f => f.severity === 'info');
+
+    return {
+      id: cp.id,
+      name: cp.name,
+      description: cp.description,
+      status,
+      actionableCount: actionableFindings.length,
+      infoCount: infoFindings.length,
+      implemented: isImplemented,
+    };
+  });
+}
+
+export function getStatusLabel(status: CheckpointStatus): string {
+  switch (status.type) {
+    case 'ok':
+      return status.hasInfo ? '○ 情報' : '○';
+    case 'found':
+      return `${status.count}件`;
+    case 'fixed':
+      return '修正済み';
+    case 'unimplemented':
+      return '未実装';
+  }
+}
+
+export function buildFixHistory(findings: Finding[]): FixHistory {
+  const history: FixHistory = {};
+  for (const finding of findings) {
+    if ((finding.severity === 'error' || finding.severity === 'warning') && finding.fix) {
+      history[finding.checkId] = (history[finding.checkId] || 0) + 1;
+    }
+  }
+  return history;
+}

@@ -60,19 +60,19 @@ export function FileDropZone({ onFileSelect, disabled }: FileDropZoneProps) {
       <input
         ref={inputRef}
         type="file"
-        accept=".csv,.txt,.tsv"
+        accept=".csv,.txt,.tsv,.xlsx,.xls"
         onChange={handleChange}
         style={{ display: 'none' }}
       />
       <div className="drop-zone-content">
         <div className="drop-zone-icon">📁</div>
         <div className="drop-zone-text">
-          CSVファイルをドラッグ＆ドロップ
+          CSV/Excelファイルをドラッグ＆ドロップ
           <br />
           またはクリックして選択
         </div>
         <div className="drop-zone-hint">
-          対応形式: CSV, TSV（Shift_JIS / UTF-8）
+          対応形式: CSV, TSV, Excel（.xlsx, .xls）
         </div>
       </div>
     </div>
