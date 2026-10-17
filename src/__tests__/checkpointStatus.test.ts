@@ -133,6 +133,10 @@ describe('deriveAllCheckpointStates', () => {
     expect(totals?.implemented).toBe(true);
     expect(totals?.status).toEqual({ type: 'ok', hasInfo: false });
 
+    const wareki = states.find(s => s.id === 'wareki');
+    expect(wareki?.implemented).toBe(true);
+    expect(wareki?.status).toEqual({ type: 'ok', hasInfo: false });
+
     const encoding = states.find(s => s.id === 'encoding');
     expect(encoding?.implemented).toBe(true);
   });

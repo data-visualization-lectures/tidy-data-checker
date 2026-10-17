@@ -7,6 +7,7 @@ import { multiHeaderCheck } from './multiHeader';
 import { totalsCheck } from './totals';
 import { symbolsCheck } from './symbols';
 import { formatNumberCheck } from './formatNumber';
+import { warekiCheck } from './wareki';
 
 export interface CheckpointDefinition {
   id: string;
@@ -68,7 +69,7 @@ export const checkpointRegistry: CheckpointDefinition[] = [
     id: 'wareki',
     name: '和暦などの日付',
     description: '和暦（令和・平成など）を西暦に変換し、日付形式を統一します。',
-    check: null,
+    check: warekiCheck,
   },
   {
     id: 'wide-to-long',

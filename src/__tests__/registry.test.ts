@@ -50,8 +50,8 @@ describe('checkpointRegistry', () => {
     expect(implemented.map(cp => cp.id)).toContain('totals');
     expect(implemented.map(cp => cp.id)).toContain('symbols');
     expect(implemented.map(cp => cp.id)).toContain('format-number');
+    expect(implemented.map(cp => cp.id)).toContain('wareki');
 
-    expect(unimplemented.map(cp => cp.id)).toContain('wareki');
     expect(unimplemented.map(cp => cp.id)).toContain('wide-to-long');
     expect(unimplemented.map(cp => cp.id)).toContain('final');
   });
