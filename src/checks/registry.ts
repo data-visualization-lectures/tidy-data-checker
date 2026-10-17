@@ -5,6 +5,7 @@ import { emptyCheck } from './empty';
 import { titleNotesCheck } from './titleNotes';
 import { multiHeaderCheck } from './multiHeader';
 import { totalsCheck } from './totals';
+import { symbolsCheck } from './symbols';
 
 export interface CheckpointDefinition {
   id: string;
@@ -54,7 +55,7 @@ export const checkpointRegistry: CheckpointDefinition[] = [
     id: 'symbols',
     name: '値の中の記号',
     description: '※、-、…、x、秘匿などの記号を検出し、欠損値として処理できます。',
-    check: null,
+    check: symbolsCheck,
   },
   {
     id: 'format-number',
