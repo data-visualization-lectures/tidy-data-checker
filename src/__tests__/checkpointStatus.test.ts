@@ -221,11 +221,75 @@ describe('getStatusLabel', () => {
     expect(getStatusLabel({ type: 'found', count: 1 })).toBe('1件');
   });
 
+  it('should return count with scope for found with rows', () => {
+    expect(getStatusLabel({ type: 'found', count: 1, scope: { rows: 4 } })).toBe('1件（4行）');
+  });
+
+  it('should return count with scope for found with cols', () => {
+    expect(getStatusLabel({ type: 'found', count: 1, scope: { cols: 2 } })).toBe('1件（2列）');
+  });
+
+  it('should return count with scope for found with rows and cols', () => {
+    expect(getStatusLabel({ type: 'found', count: 1, scope: { rows: 3, cols: 2 } })).toBe('1件（3行・2列）');
+  });
+
   it('should return 修正済み for fixed', () => {
     expect(getStatusLabel({ type: 'fixed' })).toBe('修正済み');
   });
 
   it('should return 未実装 for unimplemented', () => {
     expect(getStatusLabel({ type: 'unimplemented' })).toBe('未実装');
+  });
+});
+
+describe('deriveCheckpointStatus scope calculation', () => {
+  it('should include row scope when findings cover multiple rows', () => {
+    const findings: Finding[] = [
+      {
+        checkId: 'empty',
+        severity: 'warning',
+        ranges: [
+          { startRow: 2, startCol: 0, endRow: 2, endCol: 3 },
+          { startRow: 5, startCol: 0, endRow: 5, endCol: 3 },
+          { startRow: 8, startCol: 0, endRow: 8, endCol: 3 },
+          { startRow: 9, startCol: 0, endRow: 9, endCol: 3 },
+        ],
+        message: '4個の空行',
+        fix: { description: '削除', apply: t => t },
+      },
+    ];
+
+    const status = deriveCheckpointStatus('empty', findings, true);
+    expect(status.type).toBe('found');
+    if (status.type === 'found') {
+      expect(status.count).toBe(1);
+      expect(status.scope).toEqual({ rows: 4 });
+    }
+  });
+
+  it('should not include scope when rows equals findings count', () => {
+    const findings: Finding[] = [
+      {
+        checkId: 'empty',
+        severity: 'warning',
+        ranges: [{ startRow: 2, startCol: 0, endRow: 2, endCol: 3 }],
+        message: '空行1',
+        fix: { description: '削除', apply: t => t },
+      },
+      {
+        checkId: 'empty',
+        severity: 'warning',
+        ranges: [{ startRow: 5, startCol: 0, endRow: 5, endCol: 3 }],
+        message: '空行2',
+        fix: { description: '削除', apply: t => t },
+      },
+    ];
+
+    const status = deriveCheckpointStatus('empty', findings, true);
+    expect(status.type).toBe('found');
+    if (status.type === 'found') {
+      expect(status.count).toBe(2);
+      expect(status.scope).toBeUndefined();
+    }
   });
 });

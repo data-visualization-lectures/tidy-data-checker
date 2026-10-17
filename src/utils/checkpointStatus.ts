@@ -5,6 +5,48 @@ export interface FixHistory {
   [checkpointId: string]: number;
 }
 
+function calculateScope(findings: Finding[]): { rows?: number; cols?: number } | undefined {
+  const affectedRows = new Set<number>();
+  const affectedCols = new Set<number>();
+  let hasRowScope = false;
+  let hasColScope = false;
+
+  for (const finding of findings) {
+    for (const range of finding.ranges) {
+      const isFullRow = range.startCol === 0 && range.endCol >= 0;
+      const isFullCol = range.startRow === 0 && range.endRow >= 0;
+      
+      if (isFullRow || range.startRow === range.endRow) {
+        for (let r = range.startRow; r <= range.endRow; r++) {
+          affectedRows.add(r);
+        }
+        hasRowScope = true;
+      }
+      
+      if (isFullCol && range.startCol === range.endCol) {
+        for (let c = range.startCol; c <= range.endCol; c++) {
+          affectedCols.add(c);
+        }
+        hasColScope = true;
+      }
+    }
+  }
+
+  if (!hasRowScope && !hasColScope) {
+    return undefined;
+  }
+
+  const scope: { rows?: number; cols?: number } = {};
+  if (hasRowScope && affectedRows.size > findings.length) {
+    scope.rows = affectedRows.size;
+  }
+  if (hasColScope && affectedCols.size > findings.length) {
+    scope.cols = affectedCols.size;
+  }
+
+  return Object.keys(scope).length > 0 ? scope : undefined;
+}
+
 export function deriveCheckpointStatus(
   checkpointId: string,
   findings: Finding[],
@@ -32,7 +74,8 @@ export function deriveCheckpointStatus(
     return { type: 'ok', hasInfo };
   }
 
-  return { type: 'found', count: actionableFindings.length };
+  const scope = calculateScope(actionableFindings);
+  return { type: 'found', count: actionableFindings.length, scope };
 }
 
 export function deriveAllCheckpointStates(
@@ -65,8 +108,22 @@ export function getStatusLabel(status: CheckpointStatus): string {
   switch (status.type) {
     case 'ok':
       return status.hasInfo ? '○ 情報' : '○';
-    case 'found':
-      return `${status.count}件`;
+    case 'found': {
+      let label = `${status.count}件`;
+      if (status.scope) {
+        const parts: string[] = [];
+        if (status.scope.rows) {
+          parts.push(`${status.scope.rows}行`);
+        }
+        if (status.scope.cols) {
+          parts.push(`${status.scope.cols}列`);
+        }
+        if (parts.length > 0) {
+          label += `（${parts.join('・')}）`;
+        }
+      }
+      return label;
+    }
     case 'fixed':
       return '修正済み';
     case 'unimplemented':

@@ -33,6 +33,8 @@ export type Severity = 'error' | 'warning' | 'info';
 export interface Fix {
   description: string;
   apply: (table: Table) => Table;
+  deletedRows?: number[];
+  deletedCols?: number[];
 }
 
 export interface Finding {
@@ -65,6 +67,7 @@ export interface Check {
 
 export interface HistoryEntry {
   table: Table;
+  mergedCells?: MergedCell[];
   appliedFix: {
     checkId: string;
     fixDescription: string;
@@ -74,7 +77,7 @@ export interface HistoryEntry {
 
 export type CheckpointStatus = 
   | { type: 'ok'; hasInfo: boolean }
-  | { type: 'found'; count: number }
+  | { type: 'found'; count: number; scope?: { rows?: number; cols?: number } }
   | { type: 'fixed' }
   | { type: 'unimplemented' };
 

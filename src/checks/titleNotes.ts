@@ -111,6 +111,7 @@ function createRemoveTitleRowsFix(rowIndices: number[]): Fix {
       const indexSet = new Set(rowIndices);
       return table.filter((_, index) => !indexSet.has(index));
     },
+    deletedRows: sorted,
   };
 }
 
@@ -122,6 +123,7 @@ function createRemoveNoteRowsFix(rowIndices: number[]): Fix {
       const indexSet = new Set(rowIndices);
       return table.filter((_, index) => !indexSet.has(index));
     },
+    deletedRows: sorted,
   };
 }
 

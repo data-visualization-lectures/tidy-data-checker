@@ -1,5 +1,6 @@
 import type { Finding } from '../types';
 import { rangeToA1 } from '../utils/cellRef';
+import { getDisplaySeverity } from '../utils/displaySeverity';
 
 interface FindingItemProps {
   finding: Finding;
@@ -25,14 +26,16 @@ export function FindingItem({ finding, isSelected, onSelect, onPreviewFix }: Fin
     ? finding.ranges.map(r => rangeToA1(r.startRow, r.startCol, r.endRow, r.endCol)).join(', ')
     : null;
 
+  const displaySeverity = getDisplaySeverity(finding);
+
   return (
     <div
-      className={`finding-item severity-${finding.severity} ${isSelected ? 'selected' : ''}`}
+      className={`finding-item severity-${displaySeverity} ${isSelected ? 'selected' : ''}`}
       onClick={onSelect}
     >
       <div className="finding-header">
         <span className="finding-severity">
-          {severityIcons[finding.severity]} {severityLabels[finding.severity]}
+          {severityIcons[displaySeverity]} {severityLabels[displaySeverity]}
         </span>
         {cellRefs && (
           <span className="finding-cells">{cellRefs}</span>

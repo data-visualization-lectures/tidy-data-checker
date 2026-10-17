@@ -27,6 +27,7 @@ function createRemoveRowsFix(emptyRowIndices: number[]): Fix {
       const indexSet = new Set(emptyRowIndices);
       return table.filter((_, index) => !indexSet.has(index));
     },
+    deletedRows: sorted,
   };
 }
 
@@ -51,6 +52,7 @@ function createRemoveColsFix(emptyColIndices: number[], maxCols: number): Fix {
         return newRow;
       });
     },
+    deletedCols: sorted,
   };
 }
 

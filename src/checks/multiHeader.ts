@@ -101,6 +101,10 @@ function flattenHeaders(table: Table, headerRowCount: number): string[] {
 }
 
 function createFlattenHeadersFix(headerRowCount: number): Fix {
+  const deletedRows = [];
+  for (let i = 1; i < headerRowCount; i++) {
+    deletedRows.push(i);
+  }
   return {
     description: `${headerRowCount}行のヘッダーを1行に統合（例: "人口_男"）`,
     apply: (table: Table): Table => {
@@ -111,6 +115,7 @@ function createFlattenHeadersFix(headerRowCount: number): Fix {
 
       return [flatHeaders, ...dataRows];
     },
+    deletedRows,
   };
 }
 
