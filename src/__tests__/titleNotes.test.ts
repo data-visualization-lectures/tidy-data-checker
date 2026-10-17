@@ -1,6 +1,35 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { titleNotesCheck } from '../checks/titleNotes';
+import { multiHeaderCheck } from '../checks/multiHeader';
+import { parseCSV } from '../utils/csv';
+import { parseExcelSheet } from '../utils/excel';
 import type { Table, CheckContext } from '../types';
+
+const fixturesDir = join(__dirname, 'fixtures');
+
+const ESTAT_UNIT_CSV = `表1 都道府県別事業所数（平成30年～令和2年）
+単位：事業所
+
+都道府県,平成30年,令和元年,令和2年
+全国,"１，２３４","1,300",△10
+北海道,500,x,…
+青森県,734,-,"1,310※"
+注：x は秘匿、… は不詳、△ は減少
+出典：架空統計
+`;
+
+function applyAllStep4Fixes(table: Table, ctx: CheckContext): Table {
+  let current = table;
+  for (let i = 0; i < 10; i++) {
+    const findings = titleNotesCheck.detect(current, ctx);
+    const fixable = findings.find(f => f.severity === 'warning' && f.fix);
+    if (!fixable?.fix) break;
+    current = fixable.fix.apply(current);
+  }
+  return current;
+}
 
 function createContext(overrides: Partial<CheckContext> = {}): CheckContext {
   return {
@@ -59,7 +88,7 @@ describe('titleNotesCheck', () => {
 
       const unitFinding = findings.find(f => f.message.includes('単位行'));
       expect(unitFinding).toBeDefined();
-      expect(unitFinding?.severity).toBe('info');
+      expect(unitFinding?.severity).toBe('warning');
       expect(unitFinding?.metadata?.units).toContain('千人');
     });
 
@@ -156,6 +185,107 @@ describe('titleNotesCheck', () => {
       const fixed = noteFinding!.fix!.apply(table);
       
       expect(fixed.length).toBe(2);
+    });
+  });
+
+  describe('unit row deletion', () => {
+    it('should warn about a unit row and remove it when the fix is applied', () => {
+      const table: Table = [
+        ['表1 事業所数', '', ''],
+        ['単位：事業所', '', ''],
+        ['都道府県', '平成30年', '令和元年'],
+        ['北海道', '500', '600'],
+        ['青森県', '734', '800'],
+      ];
+      const ctx = createContext();
+
+      const findings = titleNotesCheck.detect(table, ctx);
+      const unitFinding = findings.find(f => f.message.includes('単位行'));
+
+      expect(unitFinding).toBeDefined();
+      expect(unitFinding?.severity).toBe('warning');
+      expect(unitFinding?.fix).toBeDefined();
+      expect(unitFinding?.fix?.description).toBe('単位行を削除（行 2、単位「事業所」）');
+      expect(unitFinding?.fix?.deletedRows).toEqual([1]);
+      expect(unitFinding?.metadata?.units).toContain('事業所');
+      expect(ctx.detectedUnit).toBe('事業所');
+
+      const fixed = unitFinding!.fix!.apply(table);
+      expect(fixed.some(row => row.some(cell => cell.includes('単位：事業所')))).toBe(false);
+      expect(fixed[0][0]).toBe('表1 事業所数');
+      expect(fixed[1][0]).toBe('都道府県');
+    });
+
+    it('should not delete a row with 3 or more non-empty cells that contains 単位', () => {
+      const table: Table = [
+        ['単位：人', '', ''],
+        ['人口（単位：人）', '世帯数', '面積'],
+        ['北海道', '100', '200'],
+        ['青森県', '10', '20'],
+      ];
+      const ctx = createContext();
+
+      const findings = titleNotesCheck.detect(table, ctx);
+      const unitFinding = findings.find(f => f.message.includes('単位行'));
+
+      expect(unitFinding?.fix).toBeDefined();
+      expect(unitFinding?.fix?.deletedRows).toEqual([0]);
+
+      const fixed = unitFinding!.fix!.apply(table);
+      expect(fixed[0][0]).toBe('人口（単位：人）');
+      expect(fixed[0][1]).toBe('世帯数');
+      expect(fixed.some(row => row.some(cell => cell === '単位：人'))).toBe(false);
+    });
+
+    it('should not produce 単位：事業所_都道府県 in step 5 after all step-4 fixes', () => {
+      const table = parseCSV(ESTAT_UNIT_CSV);
+      const ctx = createContext({ fileName: 'estat-unit4.csv' });
+      const fixed = applyAllStep4Fixes(table, ctx);
+
+      expect(fixed.some(row => row.some(cell => cell.includes('単位：事業所')))).toBe(false);
+
+      const headerFindings = multiHeaderCheck.detect(fixed, ctx);
+      const messages = headerFindings.map(f => f.message).join('\n');
+      expect(messages).not.toContain('単位：事業所_都道府県');
+      expect(messages).toContain('検出されませんでした');
+
+      for (const finding of headerFindings) {
+        if (!finding.fix) continue;
+        const applied = finding.fix.apply(fixed);
+        const flat = applied.map(row => row.join(',')).join('\n');
+        expect(flat).not.toContain('単位：事業所_都道府県');
+      }
+    });
+
+    it('should detect the 2-row header on the 人口 sheet after deleting the unit row', () => {
+      const bytes = new Uint8Array(readFileSync(join(fixturesDir, 'government-style.xlsx')));
+      const parsed = parseExcelSheet(bytes, '人口');
+      const ctx = createContext({
+        fileName: 'government-style.xlsx',
+        encoding: 'Excel',
+        mergedCells: parsed.mergedCells,
+        sheetName: '人口',
+      });
+
+      const titleFix = titleNotesCheck.detect(parsed.table, ctx)
+        .find(f => f.message.includes('タイトル行'))?.fix;
+      expect(titleFix).toBeDefined();
+      const withoutTitle = titleFix!.apply(parsed.table);
+
+      const blocked = multiHeaderCheck.detect(withoutTitle, ctx);
+      expect(blocked.some(f => f.message.includes('2行の多段ヘッダー'))).toBe(false);
+
+      const unitFix = titleNotesCheck.detect(withoutTitle, ctx)
+        .find(f => f.message.includes('単位行'))?.fix;
+      expect(unitFix).toBeDefined();
+      expect(unitFix?.description).toContain('単位「人」');
+      const withoutUnit = unitFix!.apply(withoutTitle);
+
+      expect(withoutUnit.some(row => row.some(cell => cell.includes('単位：人')))).toBe(false);
+      const headers = multiHeaderCheck.detect(withoutUnit, ctx);
+      const headerFinding = headers.find(f => f.message.includes('2行の多段ヘッダー'));
+      expect(headerFinding).toBeDefined();
+      expect(headerFinding?.message).toContain('人口');
     });
   });
 

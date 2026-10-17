@@ -127,6 +127,40 @@ function createRemoveNoteRowsFix(rowIndices: number[]): Fix {
   };
 }
 
+interface UnitRowHit {
+  row: number;
+  unit: string;
+  content: string;
+}
+
+function countNonEmpty(row: string[]): number {
+  return row.filter(cell => cell.trim() !== '').length;
+}
+
+function createRemoveUnitRowsFix(unitRows: UnitRowHit[]): Fix {
+  const sorted = [...unitRows].sort((a, b) => a.row - b.row);
+  const rowLabel = sorted.map(u => u.row + 1).join(', ');
+  const unitLabel = sorted.map(u => `「${u.unit}」`).join('、');
+  const description = sorted.length === 1
+    ? `単位行を削除（行 ${sorted[0].row + 1}、単位「${sorted[0].unit}」）`
+    : `単位行を削除（行 ${rowLabel}、単位${unitLabel}）`;
+
+  return {
+    description,
+    apply: (table: Table): Table => {
+      const indexSet = new Set(unitRows.map(u => u.row));
+      return table.filter((_, index) => !indexSet.has(index));
+    },
+    deletedRows: sorted.map(u => u.row),
+  };
+}
+
+function formatUnitRowMessage(unitRows: UnitRowHit[]): string {
+  const sorted = [...unitRows].sort((a, b) => a.row - b.row);
+  const locations = sorted.map(u => `行 ${u.row + 1}「${u.content}」`).join('、');
+  return `単位行が見つかりました（${locations}）。表の中に残っていると、見出しの判定（手順5）がずれる原因になります。`;
+}
+
 export const titleNotesCheck: Check = {
   id: 'title-notes',
   title: '表の上下（タイトル・注記行）',
@@ -140,14 +174,14 @@ export const titleNotesCheck: Check = {
     const dataEndRow = findDataEndRow(table);
 
     const titleRows: number[] = [];
-    const unitRows: { row: number; unit: string }[] = [];
+    const unitRows: UnitRowHit[] = [];
 
     for (let i = 0; i < dataStartRow; i++) {
       const classification = classifyRow(table[i]);
       if (classification.type === 'title') {
         titleRows.push(i);
       } else if (classification.type === 'unit' && classification.unitValue) {
-        unitRows.push({ row: i, unit: classification.unitValue });
+        unitRows.push({ row: i, unit: classification.unitValue, content: classification.content });
       }
     }
 
@@ -157,9 +191,11 @@ export const titleNotesCheck: Check = {
       if (classification.type === 'note' || classification.type === 'title') {
         noteRows.push(i);
       } else if (classification.type === 'unit' && classification.unitValue) {
-        unitRows.push({ row: i, unit: classification.unitValue });
+        unitRows.push({ row: i, unit: classification.unitValue, content: classification.content });
       }
     }
+
+    const deletableUnitRows = unitRows.filter(u => countNonEmpty(table[u.row]) <= 2);
 
     if (titleRows.length > 0) {
       const ranges: CellRange[] = titleRows.map(row => ({
@@ -178,9 +214,12 @@ export const titleNotesCheck: Check = {
       });
     }
 
-    if (unitRows.length > 0) {
-      const unitValues = unitRows.map(u => u.unit).join(', ');
-      const ranges: CellRange[] = unitRows.map(u => ({
+    if (unitRows.length > 0 && ctx.detectedUnit === undefined) {
+      ctx.detectedUnit = unitRows[0].unit;
+    }
+
+    if (deletableUnitRows.length > 0) {
+      const ranges: CellRange[] = deletableUnitRows.map(u => ({
         startRow: u.row,
         startCol: 0,
         endRow: u.row,
@@ -189,15 +228,15 @@ export const titleNotesCheck: Check = {
 
       findings.push({
         checkId: 'title-notes',
-        severity: 'info',
+        severity: 'warning',
         ranges,
-        message: `単位行を検出: ${unitValues}（後のステップで値変換に使用できます）`,
-        metadata: { units: unitRows.map(u => u.unit), detectedUnit: unitRows[0]?.unit },
+        message: formatUnitRowMessage(deletableUnitRows),
+        fix: createRemoveUnitRowsFix(deletableUnitRows),
+        metadata: {
+          units: deletableUnitRows.map(u => u.unit),
+          detectedUnit: deletableUnitRows[0]?.unit,
+        },
       });
-
-      if (ctx.detectedUnit === undefined && unitRows.length > 0) {
-        ctx.detectedUnit = unitRows[0].unit;
-      }
     }
 
     if (noteRows.length > 0) {
@@ -217,7 +256,7 @@ export const titleNotesCheck: Check = {
       });
     }
 
-    if (titleRows.length === 0 && noteRows.length === 0 && unitRows.length === 0) {
+    if (titleRows.length === 0 && noteRows.length === 0 && deletableUnitRows.length === 0) {
       findings.push({
         checkId: 'title-notes',
         severity: 'info',
