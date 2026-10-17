@@ -129,6 +129,8 @@ export function useTableState() {
     const historyEntry: HistoryEntry = {
       table: state.table,
       mergedCells: state.mergedCells,
+      encoding: state.encoding,
+      hasBom: state.hasBom,
       appliedFix: {
         checkId: finding.checkId,
         fixDescription: fix.description,
@@ -144,10 +146,17 @@ export function useTableState() {
       updatedMergedCells = adjustMergedCellsForDeletedCols(updatedMergedCells, fix.deletedCols);
     }
 
+    let updatedEncoding = state.encoding;
+    let updatedHasBom = state.hasBom;
+    if (fix.encodingConversion) {
+      updatedEncoding = 'UTF-8';
+      updatedHasBom = false;
+    }
+
     const ctx: CheckContext = {
       fileName: state.fileName || '',
-      encoding: state.encoding,
-      hasBom: state.hasBom,
+      encoding: updatedEncoding,
+      hasBom: updatedHasBom,
       sheetName: state.sheetName,
       sheets: state.sheets,
       mergedCells: updatedMergedCells,
@@ -158,6 +167,8 @@ export function useTableState() {
     setState(prev => ({
       ...prev,
       table: previewTable,
+      encoding: updatedEncoding,
+      hasBom: updatedHasBom,
       history: [...prev.history, historyEntry],
       findings: newFindings,
       selectedFinding: null,
@@ -178,11 +189,13 @@ export function useTableState() {
     const lastEntry = newHistory.pop()!;
 
     const restoredMergedCells = lastEntry.mergedCells;
+    const restoredEncoding = lastEntry.encoding ?? state.encoding;
+    const restoredHasBom = lastEntry.hasBom ?? state.hasBom;
 
     const ctx: CheckContext = {
       fileName: state.fileName || '',
-      encoding: state.encoding,
-      hasBom: state.hasBom,
+      encoding: restoredEncoding,
+      hasBom: restoredHasBom,
       sheetName: state.sheetName,
       sheets: state.sheets,
       mergedCells: restoredMergedCells,
@@ -193,6 +206,8 @@ export function useTableState() {
     setState(prev => ({
       ...prev,
       table: lastEntry.table,
+      encoding: restoredEncoding,
+      hasBom: restoredHasBom,
       history: newHistory,
       findings: newFindings,
       selectedFinding: null,

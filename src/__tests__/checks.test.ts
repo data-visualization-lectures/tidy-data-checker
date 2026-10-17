@@ -13,25 +13,53 @@ function createContext(overrides: Partial<CheckContext> = {}): CheckContext {
 }
 
 describe('encodingCheck', () => {
-  it('should report detected encoding as info', () => {
+  it('should report UTF-8 (no BOM) as info with no fix needed', () => {
     const table: Table = [['header'], ['value']];
-    const ctx = createContext({ encoding: 'Shift_JIS' });
+    const ctx = createContext({ encoding: 'UTF-8', hasBom: false });
 
     const findings = encodingCheck.detect(table, ctx);
 
     const infoFinding = findings.find(f => f.severity === 'info');
     expect(infoFinding).toBeDefined();
-    expect(infoFinding?.message).toContain('Shift_JIS');
+    expect(infoFinding?.message).toContain('UTF-8');
+    expect(infoFinding?.fix).toBeUndefined();
   });
 
-  it('should report BOM in encoding info', () => {
+  it('should report Shift_JIS as actionable warning with fix', () => {
+    const table: Table = [['header'], ['value']];
+    const ctx = createContext({ encoding: 'Shift_JIS' });
+
+    const findings = encodingCheck.detect(table, ctx);
+
+    const warningFinding = findings.find(f => f.severity === 'warning');
+    expect(warningFinding).toBeDefined();
+    expect(warningFinding?.message).toContain('Shift_JIS');
+    expect(warningFinding?.fix).toBeDefined();
+    expect(warningFinding?.fix?.description).toBe('文字コードをUTF-8に変換');
+  });
+
+  it('should report BOM as actionable warning with fix', () => {
     const table: Table = [['header'], ['value']];
     const ctx = createContext({ encoding: 'UTF-8', hasBom: true });
 
     const findings = encodingCheck.detect(table, ctx);
 
+    const warningFinding = findings.find(f => f.severity === 'warning');
+    expect(warningFinding).toBeDefined();
+    expect(warningFinding?.message).toContain('BOM付き');
+    expect(warningFinding?.fix).toBeDefined();
+    expect(warningFinding?.fix?.encodingConversion).toEqual({ from: 'UTF-8', hasBom: true });
+  });
+
+  it('should report Excel as info (no fix needed)', () => {
+    const table: Table = [['header'], ['value']];
+    const ctx = createContext({ encoding: 'Excel' });
+
+    const findings = encodingCheck.detect(table, ctx);
+
     const infoFinding = findings.find(f => f.severity === 'info');
-    expect(infoFinding?.message).toContain('BOM付き');
+    expect(infoFinding).toBeDefined();
+    expect(infoFinding?.fix).toBeUndefined();
   });
 
   it('should detect U+FFFD replacement character as mojibake', () => {

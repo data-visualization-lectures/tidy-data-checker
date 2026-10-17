@@ -157,6 +157,8 @@ function App() {
                 table={table}
                 fileName={fileName || 'data.csv'}
                 historyLength={history.length}
+                encoding={encoding}
+                hasBom={hasBom}
                 onUndo={undo}
                 onReset={reset}
               />

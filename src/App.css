@@ -498,6 +498,14 @@
   background: var(--color-primary-hover);
 }
 
+.export-button.encoding-warning {
+  background: var(--color-warning);
+}
+
+.export-button.encoding-warning:hover {
+  background: #e6a700;
+}
+
 .fix-preview-overlay {
   position: fixed;
   top: 0;

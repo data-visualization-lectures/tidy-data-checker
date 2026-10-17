@@ -6,14 +6,32 @@ interface ExportPanelProps {
   table: Table;
   fileName: string;
   historyLength: number;
+  encoding: string;
+  hasBom: boolean;
   onUndo: () => void;
   onReset: () => void;
 }
 
-export function ExportPanel({ table, fileName, historyLength, onUndo, onReset }: ExportPanelProps) {
+function isEncodingReady(encoding: string, hasBom: boolean): boolean {
+  if (encoding === 'Excel') {
+    return true;
+  }
+  return encoding === 'UTF-8' && !hasBom;
+}
+
+export function ExportPanel({ table, fileName, historyLength, encoding, hasBom, onUndo, onReset }: ExportPanelProps) {
   const [withBom, setWithBom] = useState(false);
+  const encodingReady = isEncodingReady(encoding, hasBom);
 
   const handleExport = () => {
+    if (!encodingReady) {
+      const proceed = window.confirm(
+        `元ファイルは${encoding}${hasBom ? '（BOM付き）' : ''}です。\n` +
+        'UTF-8への変換修正が未適用です。このままエクスポートしますか？\n\n' +
+        '（チェックリストの「文字コード」から変換できます）'
+      );
+      if (!proceed) return;
+    }
     exportAsUTF8CSV(table, fileName, withBom);
   };
 
@@ -44,7 +62,11 @@ export function ExportPanel({ table, fileName, historyLength, onUndo, onReset }:
           BOM付き（Excel用）
         </label>
 
-        <button className="export-button" onClick={handleExport}>
+        <button 
+          className={`export-button ${!encodingReady ? 'encoding-warning' : ''}`}
+          onClick={handleExport}
+          title={!encodingReady ? `元ファイル: ${encoding}${hasBom ? '（BOM付き）' : ''} - UTF-8変換を推奨` : ''}
+        >
           📥 UTF-8 CSVをエクスポート
         </button>
       </div>

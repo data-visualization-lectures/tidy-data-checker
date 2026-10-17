@@ -35,6 +35,10 @@ export interface Fix {
   apply: (table: Table) => Table;
   deletedRows?: number[];
   deletedCols?: number[];
+  encodingConversion?: {
+    from: string;
+    hasBom: boolean;
+  };
 }
 
 export interface Finding {
@@ -68,6 +72,8 @@ export interface Check {
 export interface HistoryEntry {
   table: Table;
   mergedCells?: MergedCell[];
+  encoding?: string;
+  hasBom?: boolean;
   appliedFix: {
     checkId: string;
     fixDescription: string;
