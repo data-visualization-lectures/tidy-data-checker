@@ -36,10 +36,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-#root {
-  min-height: 100vh;
-}
-
 button {
   cursor: pointer;
   font-family: inherit;
