@@ -1,5 +1,6 @@
 import type { CheckpointState, Finding } from '../types';
 import { getStatusLabel } from '../utils/checkpointStatus';
+import { isCheckPendingEncoding } from './CheckPanel';
 
 interface ChecklistPanelProps {
   checkpoints: CheckpointState[];
@@ -22,11 +23,10 @@ export function ChecklistPanel({
 
       <div className="checklist-items">
         {checkpoints.map((cp, index) => {
-          const isEncodingCheck = cp.id === 'encoding';
-          const isPendingEncoding = !encodingFixed && !isEncodingCheck;
+          const isPendingEncoding = isCheckPendingEncoding(cp.id, encodingFixed);
           
           const displayStatus = isPendingEncoding 
-            ? '文字コードの修正後にチェック'
+            ? '手順1のあと'
             : getStatusLabel(cp.status);
           
           const isSelected = selectedCheckpointId === cp.id;

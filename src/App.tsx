@@ -192,7 +192,6 @@ function App() {
                   <DataGrid
                     table={table}
                     highlightRanges={highlightRanges}
-                    previewTable={pendingFix?.previewTable}
                     onCellClick={handleCellClick}
                   />
                   {selectedCell && (
@@ -213,6 +212,7 @@ function App() {
                   onSelectFinding={selectFinding}
                   onPreviewFix={previewFix}
                   filterCheckpointId={selectedCheckpointId}
+                  encodingFixed={encodingFixed}
                 />
               </div>
             </div>

@@ -123,6 +123,7 @@ export function useTableState() {
 
   const previewFix = useCallback((finding: Finding) => {
     if (!finding.fix || !state.table) return;
+    if (!state.encodingFixed && finding.checkId !== 'encoding') return;
 
     let previewTable: Table;
     if (finding.fix.encodingConversion && state.correctTable) {
@@ -135,7 +136,7 @@ export function useTableState() {
       ...prev,
       pendingFix: { finding, previewTable },
     }));
-  }, [state.table, state.correctTable]);
+  }, [state.table, state.correctTable, state.encodingFixed]);
 
   const applyFix = useCallback(() => {
     if (!state.pendingFix || !state.table) return;
