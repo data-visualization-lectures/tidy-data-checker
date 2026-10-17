@@ -1,7 +1,7 @@
-import type { Check, Finding, Table, CheckContext } from '../types';
+import type { Check, Finding, Table, CheckContext, Fix } from '../types';
 import { matchSymbol, classifyColumns, type SymbolKind, type ColumnKind } from '../utils/values';
-import { createCellEditFix } from '../utils/cellEdit';
-import { getDataRegion, isDataRow, type DataRegion } from '../utils/dataRegion';
+import { createCellEditFix, type CellEdit } from '../utils/cellEdit';
+import { getDataRegion, isDataRow, getColumnLabel, type DataRegion } from '../utils/dataRegion';
 import { cellsToRanges } from '../utils/cellRef';
 
 interface SymbolCell {
@@ -13,6 +13,9 @@ interface SymbolCell {
 }
 
 const KIND_ORDER: SymbolKind[] = ['missing', 'dash', 'negative', 'marker', 'unknown'];
+
+/** 注記列の代替案を出す列数の上限（これを超える横持ち表では出さない） */
+const NOTE_COLUMN_LIMIT = 5;
 
 function collectSymbolCells(table: Table, region: DataRegion, kinds: ColumnKind[]): SymbolCell[] {
   const cells: SymbolCell[] = [];
@@ -98,6 +101,82 @@ function fixDescription(kind: SymbolKind, count: number): string | null {
   }
 }
 
+function noteValue(cell: SymbolCell): string {
+  if (cell.kind !== 'marker') return cell.raw;
+  const mark = symbolLabel(cell);
+  return mark === '' ? cell.raw : mark;
+}
+
+function createDashToZeroFix(cells: SymbolCell[]): Fix {
+  return createCellEditFix(
+    `「-」を 0 にする（${cells.length} セル）`,
+    cells.map(cell => ({ row: cell.row, col: cell.col, value: '0' })),
+  );
+}
+
+function dashToZeroFinding(cells: SymbolCell[]): Finding {
+  const { counts } = countLabels(cells);
+  const cols = [...new Set(cells.map(cell => cell.col))].sort((a, b) => a - b);
+  return {
+    checkId: 'symbols',
+    severity: 'info',
+    ranges: cellsToRanges(cells),
+    message: '別の方法：「-」を 0 にすることもできます。「該当なし＝0」とみなせる資料のときに使います。',
+    metadata: { kind: 'dash-to-zero', counts, cols },
+    fix: createDashToZeroFix(cells),
+  };
+}
+
+function createFlagColumnsFix(table: Table, region: DataRegion, cells: SymbolCell[]): Fix {
+  const sourceCols = [...new Set(cells.map(cell => cell.col))].sort((a, b) => a - b);
+  const baseCol = region.maxCols;
+  const edits: CellEdit[] = [];
+
+  sourceCols.forEach((srcCol, index) => {
+    const destCol = baseCol + index;
+    const header = `${getColumnLabel(table, srcCol, region)}_注記`;
+    for (let row = 0; row < table.length; row++) {
+      edits.push({
+        row,
+        col: destCol,
+        value: row === region.headerRow ? header : '',
+      });
+    }
+  });
+
+  for (const cell of cells) {
+    const destCol = baseCol + sourceCols.indexOf(cell.col);
+    edits.push({ row: cell.row, col: destCol, value: noteValue(cell) });
+    edits.push({ row: cell.row, col: cell.col, value: cell.replacement });
+  }
+
+  return createCellEditFix(`記号を注記列に移す（${sourceCols.length} 列追加）`, edits);
+}
+
+function flagColumnsFinding(table: Table, region: DataRegion, cells: SymbolCell[]): Finding {
+  const { counts } = countLabels(cells);
+  const cols = [...new Set(cells.map(cell => cell.col))].sort((a, b) => a - b);
+  return {
+    checkId: 'symbols',
+    severity: 'info',
+    ranges: cellsToRanges(cells),
+    message: `別の方法：消す前に、元の記号を「従業者数_注記」などの列に残せます（${cols.length} 列追加）。秘匿と不詳を区別したいときに使います。`,
+    metadata: { kind: 'flag-columns', counts, cols },
+    fix: createFlagColumnsFix(table, region, cells),
+  };
+}
+
+function appendAlternatives(findings: Finding[], table: Table, region: DataRegion, cells: SymbolCell[]): void {
+  const dashCells = cells.filter(cell => cell.kind === 'dash');
+  if (dashCells.length > 0) findings.push(dashToZeroFinding(dashCells));
+
+  const flagCells = cells.filter(cell => cell.kind === 'missing' || cell.kind === 'dash' || cell.kind === 'marker');
+  const columnCount = new Set(flagCells.map(cell => cell.col)).size;
+  if (columnCount > 0 && columnCount <= NOTE_COLUMN_LIMIT) {
+    findings.push(flagColumnsFinding(table, region, flagCells));
+  }
+}
+
 function findingFor(kind: SymbolKind, cells: SymbolCell[]): Finding {
   const { counts, order } = countLabels(cells);
   const description = fixDescription(kind, cells.length);
@@ -130,6 +209,7 @@ export const symbolsCheck: Check = {
 
     const findings: Finding[] = [];
     for (const kind of KIND_ORDER) {
+      if (kind === 'unknown') appendAlternatives(findings, table, region, cells);
       const group = cells.filter(cell => cell.kind === kind);
       if (group.length > 0) findings.push(findingFor(kind, group));
     }

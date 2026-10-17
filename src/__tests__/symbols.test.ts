@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { symbolsCheck } from '../checks/symbols';
 import { parseCSV } from '../utils/csv';
-import { deriveCheckpointStatus } from '../utils/checkpointStatus';
+import { deriveCheckpointStatus, buildFixHistory, getStatusLabel } from '../utils/checkpointStatus';
 import type { Finding, Table, CheckContext } from '../types';
 
 function ctx(): CheckContext {
@@ -236,7 +236,7 @@ describe('symbolsCheck', () => {
 
     const findings = symbolsCheck.detect(table, ctx());
 
-    expect(findings.map(f => f.metadata?.kind)).toEqual(['dash', 'negative']);
+    expect(findings.filter(f => f.severity === 'warning').map(f => f.metadata?.kind)).toEqual(['dash', 'negative']);
     for (const finding of findings) {
       expect(finding.ranges.every(range => range.startCol === 1)).toBe(true);
     }
@@ -317,10 +317,178 @@ describe('symbolsCheck', () => {
     expect(again).toEqual(fixed);
   });
 
-  it('does not offer the alternative fixes', () => {
+  it('12. moves symbols into note columns at the right edge and clears the originals', () => {
+    const example3: Table = [
+      ['都道府県', '従業者数'],
+      ['北海道', 'x'],
+      ['青森県', '…'],
+      ['岩手県', '8901p'],
+    ];
+    const snapshot = JSON.parse(JSON.stringify(example3)) as Table;
+
+    const findings = symbolsCheck.detect(example3, ctx());
+    const flag = byKind(findings, 'flag-columns');
+    const missing = byKind(findings, 'missing');
+
+    expect(flag.severity).toBe('info');
+    expect(flag.message).toBe(
+      '別の方法：消す前に、元の記号を「従業者数_注記」などの列に残せます（1 列追加）。秘匿と不詳を区別したいときに使います。',
+    );
+    expect(flag.fix?.description).toBe('記号を注記列に移す（1 列追加）');
+    expect(flag.metadata).toMatchObject({ kind: 'flag-columns', counts: { x: 1, '…': 1, p: 1 }, cols: [1] });
+    expect(findings.some(f => f.metadata?.kind === 'dash-to-zero')).toBe(false);
+
+    expect(missing.severity).toBe('warning');
+    expect(missing.fix?.apply(example3)).toEqual([
+      ['都道府県', '従業者数'],
+      ['北海道', ''],
+      ['青森県', ''],
+      ['岩手県', '8901p'],
+    ]);
+
+    const after = flag.fix?.apply(example3);
+    expect(example3).toEqual(snapshot);
+    expect(after).toEqual([
+      ['都道府県', '従業者数', '従業者数_注記'],
+      ['北海道', '', 'x'],
+      ['青森県', '', '…'],
+      ['岩手県', '8901', 'p'],
+    ]);
+
+    const again = symbolsCheck.detect(after ?? [], ctx());
+    expect(again.filter(f => f.metadata?.kind === 'missing' || f.metadata?.kind === 'dash' || f.metadata?.kind === 'marker')).toEqual([]);
+    expect(again.filter(f => f.severity === 'warning')).toEqual([]);
+    expect(again.some(f => f.ranges.some(range => range.startCol === 2))).toBe(false);
+
+    const history = buildFixHistory(findings);
+    const status = deriveCheckpointStatus('symbols', again, true, history);
+    expect(status).toEqual({ type: 'fixed' });
+    expect(getStatusLabel(status)).toBe('修正済み');
+
+    const wider: Table = [
+      ['都道府県', '事業所数', '従業者数', '前年比'],
+      ['北海道', '100', '200', '2.0'],
+      ['青森県', '－', 'x', '△1.5'],
+      ['岩手県', '567※', '8901p', '▲0.3'],
+      ['※ 一部推計'],
+    ];
+    const widerFlag = byKind(symbolsCheck.detect(wider, ctx()), 'flag-columns');
+    expect(widerFlag.fix?.description).toBe('記号を注記列に移す（2 列追加）');
+    expect(widerFlag.message).toContain('（2 列追加）');
+    const moved = widerFlag.fix?.apply(wider);
+    expect(moved).toEqual([
+      ['都道府県', '事業所数', '従業者数', '前年比', '事業所数_注記', '従業者数_注記'],
+      ['北海道', '100', '200', '2.0', '', ''],
+      ['青森県', '', '', '△1.5', '－', 'x'],
+      ['岩手県', '567', '8901', '▲0.3', '※', 'p'],
+      ['※ 一部推計', '', '', '', '', ''],
+    ]);
+    const redetected = symbolsCheck.detect(moved ?? [], ctx());
+    expect(redetected.filter(f => f.metadata?.kind === 'missing' || f.metadata?.kind === 'dash' || f.metadata?.kind === 'marker')).toEqual([]);
+    expect(redetected.filter(f => f.metadata?.kind === 'negative')).toHaveLength(1);
+    expect(redetected.some(f => f.ranges.some(range => range.startCol >= 4))).toBe(false);
+  });
+
+  it('13. omits the note-column alternative when 6 or more columns are involved', () => {
+    const sixHeaders = ['地域', '人口', ...Array.from({ length: 6 }, (_, i) => `秘匿${i + 1}`)];
+    const six: Table = [
+      sixHeaders,
+      ['A', '1', ...Array(6).fill('x')],
+      ['B', '2', ...Array(6).fill('x')],
+    ];
+    const sixFindings = symbolsCheck.detect(six, ctx());
+    expect(sixFindings.some(f => f.metadata?.kind === 'flag-columns')).toBe(false);
+    expect(byKind(sixFindings, 'missing').severity).toBe('warning');
+    expect(byKind(sixFindings, 'missing').fix?.apply(six)[1].slice(2)).toEqual(['', '', '', '', '', '']);
+
+    const five: Table = [
+      ['地域', 'a', 'b', 'c', 'd', 'e'],
+      ['A', '1', '2', '3', '4', '6'],
+      ['B', 'x', '…', '-', '5p', '*'],
+    ];
+    const fiveFlag = byKind(symbolsCheck.detect(five, ctx()), 'flag-columns');
+    expect(fiveFlag.severity).toBe('info');
+    expect(fiveFlag.fix?.description).toBe('記号を注記列に移す（5 列追加）');
+    expect(fiveFlag.fix?.apply(five)[0]).toEqual([
+      '地域', 'a', 'b', 'c', 'd', 'e', 'a_注記', 'b_注記', 'c_注記', 'd_注記', 'e_注記',
+    ]);
+
+    const sixDashes: Table = [
+      ['地域', ...Array.from({ length: 6 }, (_, i) => `v${i + 1}`)],
+      ['A', ...Array(6).fill('1')],
+      ['B', ...Array(6).fill('-')],
+    ];
+    const dashFindings = symbolsCheck.detect(sixDashes, ctx());
+    expect(dashFindings.some(f => f.metadata?.kind === 'flag-columns')).toBe(false);
+    expect(byKind(dashFindings, 'dash-to-zero').severity).toBe('info');
+    expect(byKind(dashFindings, 'dash').severity).toBe('warning');
+  });
+
+  it('14. offers zero as an alternative for dashes and leaves the main fix as blank', () => {
+    const table: Table = [
+      ['都道府県', '事業所数'],
+      ['岩手県', '567'],
+      ['青森県', '-'],
+    ];
+    const snapshot = JSON.parse(JSON.stringify(table)) as Table;
+    const findings = symbolsCheck.detect(table, ctx());
+    const alt = byKind(findings, 'dash-to-zero');
+    const dash = byKind(findings, 'dash');
+
+    expect(alt.severity).toBe('info');
+    expect(alt.message).toBe(
+      '別の方法：「-」を 0 にすることもできます。「該当なし＝0」とみなせる資料のときに使います。',
+    );
+    expect(alt.fix?.description).toBe('「-」を 0 にする（1 セル）');
+    expect(alt.metadata).toMatchObject({ kind: 'dash-to-zero', counts: { '-': 1 }, cols: [1] });
+    expect(dash.severity).toBe('warning');
+    expect(dash.fix?.description).toBe('「-」を空欄にする（1 セル）');
+    expect(dash.fix?.apply(table)[2][1]).toBe('');
+
+    const after = alt.fix?.apply(table);
+    expect(table).toEqual(snapshot);
+    expect(after).toEqual([
+      ['都道府県', '事業所数'],
+      ['岩手県', '567'],
+      ['青森県', '0'],
+    ]);
+
+    const again = symbolsCheck.detect(after ?? [], ctx());
+    expect(again.find(f => f.metadata?.kind === 'dash')).toBeUndefined();
+    expect(again.filter(f => f.severity === 'warning')).toEqual([]);
+
+    const history = buildFixHistory(findings);
+    const status = deriveCheckpointStatus('symbols', again, true, history);
+    expect(status).toEqual({ type: 'fixed' });
+    expect(getStatusLabel(status)).toBe('修正済み');
+
+    const mixed: Table = [
+      ['地域', '値'],
+      ['A', '-'],
+      ['B', '－'],
+      ['C', '―'],
+      ['D', '—'],
+      ['E', 'ー'],
+      ['F', '10'],
+    ];
+    const mixedAlt = byKind(symbolsCheck.detect(mixed, ctx()), 'dash-to-zero');
+    expect(mixedAlt.fix?.description).toBe('「-」を 0 にする（5 セル）');
+    expect(mixedAlt.fix?.apply(mixed).slice(1).map(row => row[1])).toEqual(['0', '0', '0', '0', '0', '10']);
+    expect(symbolsCheck.detect(mixedAlt.fix?.apply(mixed) ?? [], ctx()).find(f => f.metadata?.kind === 'dash')).toBeUndefined();
+  });
+
+  it('15. does not count info alternatives in the checklist total', () => {
     const findings = symbolsCheck.detect(loadSymbolsFixture(), ctx());
-    expect(findings.some(f => f.message.includes('別の方法'))).toBe(false);
-    expect(findings.some(f => f.metadata?.kind === 'dash-to-zero' || f.metadata?.kind === 'flag-columns')).toBe(false);
+    const alternatives = findings.filter(f => f.metadata?.kind === 'dash-to-zero' || f.metadata?.kind === 'flag-columns');
+
+    expect(alternatives.map(f => f.metadata?.kind)).toEqual(['dash-to-zero', 'flag-columns']);
+    expect(alternatives.every(f => f.severity === 'info' && f.message.startsWith('別の方法：') && f.fix !== undefined)).toBe(true);
+
+    const status = deriveCheckpointStatus('symbols', findings, true);
+    expect(status).toMatchObject({ type: 'found', count: 4 });
+
+    const withoutAlternatives = findings.filter(f => f.metadata?.kind !== 'dash-to-zero' && f.metadata?.kind !== 'flag-columns');
+    expect(deriveCheckpointStatus('symbols', withoutAlternatives, true)).toEqual(status);
   });
 
   it('ignores a column whose header ends with _注記', () => {
@@ -344,7 +512,7 @@ describe('symbolsCheck', () => {
       const table = loadSymbolsFixture();
       const findings = symbolsCheck.detect(table, ctx());
 
-      expect(findings.map(f => f.metadata?.kind)).toEqual([
+      expect(findings.filter(f => f.metadata?.kind !== 'dash-to-zero' && f.metadata?.kind !== 'flag-columns').map(f => f.metadata?.kind)).toEqual([
         'missing',
         'dash',
         'negative',
