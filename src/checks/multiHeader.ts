@@ -24,7 +24,7 @@ function isLikelyHeaderRow(row: string[], rowIndex: number, table: Table): boole
   return rowIndex === 0;
 }
 
-function analyzeHeaders(table: Table, mergedCells: MergedCell[] = []): HeaderAnalysis {
+export function analyzeHeaders(table: Table, mergedCells: MergedCell[] = []): HeaderAnalysis {
   const headerRows: number[] = [];
 
   for (let i = 0; i < Math.min(5, table.length); i++) {
