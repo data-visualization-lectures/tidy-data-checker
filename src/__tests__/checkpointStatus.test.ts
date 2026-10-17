@@ -125,9 +125,13 @@ describe('deriveAllCheckpointStates', () => {
   it('should mark unimplemented checkpoints correctly', () => {
     const states = deriveAllCheckpointStates([]);
     
+    const wideToLong = states.find(s => s.id === 'wide-to-long');
+    expect(wideToLong?.implemented).toBe(false);
+    expect(wideToLong?.status.type).toBe('unimplemented');
+
     const totals = states.find(s => s.id === 'totals');
-    expect(totals?.implemented).toBe(false);
-    expect(totals?.status.type).toBe('unimplemented');
+    expect(totals?.implemented).toBe(true);
+    expect(totals?.status).toEqual({ type: 'ok', hasInfo: false });
 
     const encoding = states.find(s => s.id === 'encoding');
     expect(encoding?.implemented).toBe(true);
