@@ -1,6 +1,12 @@
 {
   "redirects": [
     {
+      "source": "/",
+      "has": [{ "type": "host", "value": "tidy-data-checker.vercel.app" }],
+      "destination": "https://tidy-data-checker.dataprep.jp/",
+      "permanent": true
+    },
+    {
       "source": "/:path*",
       "has": [{ "type": "host", "value": "tidy-data-checker.vercel.app" }],
       "destination": "https://tidy-data-checker.dataprep.jp/:path*",
