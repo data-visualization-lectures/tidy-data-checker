@@ -74,6 +74,8 @@ export interface HistoryEntry {
   mergedCells?: MergedCell[];
   encoding?: string;
   hasBom?: boolean;
+  correctTable?: Table | null;
+  encodingFixed?: boolean;
   appliedFix: {
     checkId: string;
     fixDescription: string;
@@ -85,7 +87,8 @@ export type CheckpointStatus =
   | { type: 'ok'; hasInfo: boolean }
   | { type: 'found'; count: number; scope?: { rows?: number; cols?: number } }
   | { type: 'fixed' }
-  | { type: 'unimplemented' };
+  | { type: 'unimplemented' }
+  | { type: 'pending-encoding'; message: string };
 
 export interface CheckpointState {
   id: string;

@@ -17,23 +17,24 @@ function detectMojibake(text: string): boolean {
 }
 
 function isPlainUTF8(encoding: string, hasBom: boolean): boolean {
-  if (encoding === 'Excel') {
-    return true;
-  }
   return encoding === 'UTF-8' && !hasBom;
+}
+
+function isExcelFile(encoding: string): boolean {
+  return encoding === 'Excel';
 }
 
 function getEncodingExplanation(encoding: string, hasBom: boolean): string {
   if (hasBom && encoding === 'UTF-8') {
-    return 'UTF-8 BOM付きファイルです。BOMはExcel連携では便利ですが、Python/Rでは予期しない問題を起こすことがあります。BOMなしUTF-8への変換を推奨します。';
+    return 'このファイルはUTF-8ですが、先頭にBOM（バイトオーダーマーク）が付いています。ExcelでCSVを開くときには便利ですが、PythonやRで読み込むと1行目に余計な文字が入ることがあります。BOMなしのUTF-8にそろえておくと安心です。';
   }
   if (encoding === 'Shift_JIS' || encoding === 'CP932') {
-    return `${encoding}（Windows日本語）ファイルです。Python（encoding='cp932'）やR（fileEncoding='CP932'）で読み込めますが、UTF-8に変換するとツール間の互換性が向上します。`;
+    return 'このファイルはShift_JIS（Windowsの日本語用の文字コード。cp932とも呼ばれます）です。MacやLinux、Python、Rなどで開くと文字化けしやすいので、今の標準であるUTF-8にそろえましょう。';
   }
   if (encoding === 'EUC-JP') {
-    return 'EUC-JP（Unix日本語）ファイルです。UTF-8に変換するとツール間の互換性が向上します。';
+    return 'このファイルはEUC-JP（古いUnix系の日本語文字コード）です。現在はUTF-8が標準なので、変換しておくと様々なツールで問題なく使えます。';
   }
-  return `${encoding}ファイルです。UTF-8に変換するとPython/R/Excelなど多くのツールで問題なく読み込めます。`;
+  return `このファイルは${encoding}です。UTF-8に変換しておくと、Python・R・Excelなど様々なツールで文字化けなく使えます。`;
 }
 
 function createEncodingFix(fromEncoding: string, hasBom: boolean): Fix {
@@ -55,12 +56,19 @@ export const encodingCheck: Check = {
   detect: (table: Table, ctx: CheckContext): Finding[] => {
     const findings: Finding[] = [];
 
-    if (isPlainUTF8(ctx.encoding, ctx.hasBom)) {
+    if (isExcelFile(ctx.encoding)) {
       findings.push({
         checkId: 'encoding',
         severity: 'info',
         ranges: [],
-        message: '検出された文字コード: UTF-8',
+        message: 'Excelファイルは文字コードの問題が起きません（書き出しはUTF-8になります）。',
+      });
+    } else if (isPlainUTF8(ctx.encoding, ctx.hasBom)) {
+      findings.push({
+        checkId: 'encoding',
+        severity: 'info',
+        ranges: [],
+        message: '文字コード: UTF-8（問題なし）。このまま様々なツールで使えます。',
       });
     } else {
       const encodingDisplay = ctx.hasBom
@@ -71,7 +79,7 @@ export const encodingCheck: Check = {
         checkId: 'encoding',
         severity: 'warning',
         ranges: [],
-        message: `検出された文字コード: ${encodingDisplay}。${getEncodingExplanation(ctx.encoding, ctx.hasBom)}`,
+        message: `文字コード: ${encodingDisplay}。${getEncodingExplanation(ctx.encoding, ctx.hasBom)}`,
         fix: createEncodingFix(ctx.encoding, ctx.hasBom),
       });
     }

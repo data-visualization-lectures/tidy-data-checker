@@ -4,6 +4,7 @@ import { join } from 'path';
 import { encodingCheck } from '../checks/encoding';
 import { deriveCheckpointStatus, buildFixHistory } from '../utils/checkpointStatus';
 import { detectAndDecode } from '../utils/decode';
+import { parseCSVWithMeta } from '../utils/csv';
 import type { Table, CheckContext, Finding } from '../types';
 
 const fixturesDir = join(__dirname, 'fixtures');
@@ -145,5 +146,45 @@ describe('encoding fix apply/undo', () => {
     };
 
     expect(fix.encodingConversion?.from).toBe('Shift_JIS');
+  });
+});
+
+describe('educational mojibake flow', () => {
+  it('should return garbledText when decoding Shift_JIS as UTF-8', () => {
+    const bytes = new Uint8Array(readFileSync(join(fixturesDir, 'prefecture-sjis.csv')));
+    const result = detectAndDecode(bytes);
+    
+    expect(result.garbledText).toBeDefined();
+    expect(result.garbledText).not.toBe(result.text);
+    expect(result.garbledText).not.toContain('都道府県');
+    expect(result.text).toContain('都道府県');
+  });
+
+  it('should not return garbledText for plain UTF-8 files', () => {
+    const bytes = new Uint8Array(readFileSync(join(fixturesDir, 'prefecture-utf8.csv')));
+    const result = detectAndDecode(bytes);
+    
+    expect(result.garbledText).toBeUndefined();
+    expect(result.text).toContain('都道府県');
+  });
+
+  it('should not return garbledText for UTF-8 BOM files', () => {
+    const bytes = new Uint8Array(readFileSync(join(fixturesDir, 'prefecture-utf8-bom.csv')));
+    const result = detectAndDecode(bytes);
+    
+    expect(result.garbledText).toBeUndefined();
+    expect(result.text).toContain('都道府県');
+  });
+
+  it('should parse garbled text into a table with mojibake characters', () => {
+    const bytes = new Uint8Array(readFileSync(join(fixturesDir, 'prefecture-sjis.csv')));
+    const { text, garbledText } = detectAndDecode(bytes);
+    
+    const correctTable = parseCSVWithMeta(text).table;
+    const garbledTable = parseCSVWithMeta(garbledText!).table;
+    
+    expect(correctTable[0][0]).toContain('都道府県');
+    expect(garbledTable[0][0]).not.toContain('都道府県');
+    expect(garbledTable[0][0]).toContain('�');
   });
 });

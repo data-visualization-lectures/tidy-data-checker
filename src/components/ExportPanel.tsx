@@ -8,31 +8,28 @@ interface ExportPanelProps {
   historyLength: number;
   encoding: string;
   hasBom: boolean;
+  encodingFixed: boolean;
   onUndo: () => void;
   onReset: () => void;
 }
 
-function isEncodingReady(encoding: string, hasBom: boolean): boolean {
-  if (encoding === 'Excel') {
-    return true;
-  }
-  return encoding === 'UTF-8' && !hasBom;
+function getEncodingDisplayName(encoding: string, hasBom: boolean): string {
+  if (hasBom) return `${encoding}（BOM付き）`;
+  return encoding;
 }
 
-export function ExportPanel({ table, fileName, historyLength, encoding, hasBom, onUndo, onReset }: ExportPanelProps) {
+export function ExportPanel({ table, fileName, historyLength, encoding, hasBom, encodingFixed, onUndo, onReset }: ExportPanelProps) {
   const [withBom, setWithBom] = useState(false);
-  const encodingReady = isEncodingReady(encoding, hasBom);
+  const [showEncodingBlockedNotice, setShowEncodingBlockedNotice] = useState(false);
+  
+  const canExport = encodingFixed;
 
-  const handleExport = () => {
-    if (!encodingReady) {
-      const proceed = window.confirm(
-        `元ファイルは${encoding}${hasBom ? '（BOM付き）' : ''}です。\n` +
-        'UTF-8への変換修正が未適用です。このままエクスポートしますか？\n\n' +
-        '（チェックリストの「文字コード」から変換できます）'
-      );
-      if (!proceed) return;
+  const handleExportClick = () => {
+    if (!canExport) {
+      setShowEncodingBlockedNotice(true);
+    } else {
+      exportAsUTF8CSV(table, fileName, withBom);
     }
-    exportAsUTF8CSV(table, fileName, withBom);
   };
 
   return (
@@ -63,13 +60,39 @@ export function ExportPanel({ table, fileName, historyLength, encoding, hasBom, 
         </label>
 
         <button 
-          className={`export-button ${!encodingReady ? 'encoding-warning' : ''}`}
-          onClick={handleExport}
-          title={!encodingReady ? `元ファイル: ${encoding}${hasBom ? '（BOM付き）' : ''} - UTF-8変換を推奨` : ''}
+          className={`export-button ${!canExport ? 'encoding-blocked' : ''}`}
+          onClick={handleExportClick}
+          title={!canExport ? `文字コードの修正が必要です` : ''}
         >
           📥 UTF-8 CSVをエクスポート
         </button>
       </div>
+
+      {showEncodingBlockedNotice && (
+        <div className="encoding-notice-overlay">
+          <div className="encoding-notice-modal">
+            <h3>エクスポートできません</h3>
+            <p>
+              現在のデータは <strong>文字化け</strong> した状態で表示されています。
+            </p>
+            <p>
+              文字化けを解消するには、手順1「文字コード」の修正を先に適用してください。
+            </p>
+            <p className="encoding-notice-hint">
+              💡 元ファイルは <strong>{getEncodingDisplayName(encoding, hasBom)}</strong> です。
+              チェックリストの「文字コード」をクリックして、UTF-8への変換を適用してください。
+            </p>
+            <div className="encoding-notice-actions">
+              <button 
+                className="encoding-notice-primary"
+                onClick={() => setShowEncodingBlockedNotice(false)}
+              >
+                手順1へ戻る
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

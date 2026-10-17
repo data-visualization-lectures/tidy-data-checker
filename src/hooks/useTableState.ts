@@ -9,6 +9,8 @@ interface TableState {
   encoding: string;
   hasBom: boolean;
   table: Table | null;
+  correctTable: Table | null;
+  encodingFixed: boolean;
   history: HistoryEntry[];
   findings: Finding[];
   selectedFinding: Finding | null;
@@ -29,6 +31,8 @@ const initialState: TableState = {
   encoding: '',
   hasBom: false,
   table: null,
+  correctTable: null,
+  encodingFixed: false,
   history: [],
   findings: [],
   selectedFinding: null,
@@ -39,6 +43,7 @@ const initialState: TableState = {
 
 export interface SetTableOptions {
   table: Table;
+  garbledTable?: Table;
   fileName: string;
   encoding: string;
   hasBom: boolean;
@@ -73,7 +78,11 @@ export function useTableState() {
   }, [state.findings, state.selectedCheckpointId]);
 
   const setTable = useCallback((options: SetTableOptions) => {
-    const { table, fileName, encoding, hasBom, sheetName, sheets, mergedCells, delimiter } = options;
+    const { table, garbledTable, fileName, encoding, hasBom, sheetName, sheets, mergedCells, delimiter } = options;
+    
+    const needsEncodingFix = !!(garbledTable && garbledTable !== table);
+    const displayTable = needsEncodingFix ? garbledTable : table;
+    
     const ctx: CheckContext = { fileName, encoding, hasBom, sheetName, sheets, mergedCells, delimiter };
     const findings = runChecks(table, ctx);
 
@@ -83,7 +92,9 @@ export function useTableState() {
       fileName,
       encoding,
       hasBom,
-      table,
+      table: displayTable,
+      correctTable: needsEncodingFix ? table : null,
+      encodingFixed: !needsEncodingFix,
       history: [],
       findings,
       selectedFinding: null,
@@ -113,12 +124,18 @@ export function useTableState() {
   const previewFix = useCallback((finding: Finding) => {
     if (!finding.fix || !state.table) return;
 
-    const previewTable = finding.fix.apply(state.table);
+    let previewTable: Table;
+    if (finding.fix.encodingConversion && state.correctTable) {
+      previewTable = state.correctTable;
+    } else {
+      previewTable = finding.fix.apply(state.table);
+    }
+    
     setState(prev => ({
       ...prev,
       pendingFix: { finding, previewTable },
     }));
-  }, [state.table]);
+  }, [state.table, state.correctTable]);
 
   const applyFix = useCallback(() => {
     if (!state.pendingFix || !state.table) return;
@@ -131,6 +148,8 @@ export function useTableState() {
       mergedCells: state.mergedCells,
       encoding: state.encoding,
       hasBom: state.hasBom,
+      correctTable: state.correctTable,
+      encodingFixed: state.encodingFixed,
       appliedFix: {
         checkId: finding.checkId,
         fixDescription: fix.description,
@@ -148,9 +167,14 @@ export function useTableState() {
 
     let updatedEncoding = state.encoding;
     let updatedHasBom = state.hasBom;
+    let updatedEncodingFixed = state.encodingFixed;
+    let updatedCorrectTable = state.correctTable;
+    
     if (fix.encodingConversion) {
       updatedEncoding = 'UTF-8';
       updatedHasBom = false;
+      updatedEncodingFixed = true;
+      updatedCorrectTable = null;
     }
 
     const ctx: CheckContext = {
@@ -167,6 +191,8 @@ export function useTableState() {
     setState(prev => ({
       ...prev,
       table: previewTable,
+      correctTable: updatedCorrectTable,
+      encodingFixed: updatedEncodingFixed,
       encoding: updatedEncoding,
       hasBom: updatedHasBom,
       history: [...prev.history, historyEntry],
@@ -191,6 +217,8 @@ export function useTableState() {
     const restoredMergedCells = lastEntry.mergedCells;
     const restoredEncoding = lastEntry.encoding ?? state.encoding;
     const restoredHasBom = lastEntry.hasBom ?? state.hasBom;
+    const restoredCorrectTable = lastEntry.correctTable ?? state.correctTable;
+    const restoredEncodingFixed = lastEntry.encodingFixed ?? state.encodingFixed;
 
     const ctx: CheckContext = {
       fileName: state.fileName || '',
@@ -201,11 +229,13 @@ export function useTableState() {
       mergedCells: restoredMergedCells,
       delimiter: state.delimiter,
     };
-    const newFindings = runChecks(lastEntry.table, ctx);
+    const newFindings = runChecks(restoredCorrectTable ?? lastEntry.table, ctx);
 
     setState(prev => ({
       ...prev,
       table: lastEntry.table,
+      correctTable: restoredCorrectTable,
+      encodingFixed: restoredEncodingFixed,
       encoding: restoredEncoding,
       hasBom: restoredHasBom,
       history: newHistory,
@@ -215,7 +245,7 @@ export function useTableState() {
       mergedCells: restoredMergedCells,
       tableVersion: prev.tableVersion + 1,
     }));
-  }, [state.history, state.fileName, state.encoding, state.hasBom, state.sheetName, state.sheets, state.delimiter, runChecks]);
+  }, [state.history, state.fileName, state.encoding, state.hasBom, state.correctTable, state.encodingFixed, state.sheetName, state.sheets, state.delimiter, runChecks]);
 
   const reset = useCallback(() => {
     setState(initialState);

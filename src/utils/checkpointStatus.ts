@@ -128,6 +128,8 @@ export function getStatusLabel(status: CheckpointStatus): string {
       return '修正済み';
     case 'unimplemented':
       return '未実装';
+    case 'pending-encoding':
+      return status.message;
   }
 }
 

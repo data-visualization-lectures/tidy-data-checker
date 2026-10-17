@@ -4,6 +4,7 @@ export interface DecodeResult {
   text: string;
   encoding: string;
   hasBom: boolean;
+  garbledText?: string;
 }
 
 export function detectAndDecode(bytes: Uint8Array): DecodeResult {
@@ -14,12 +15,14 @@ export function detectAndDecode(bytes: Uint8Array): DecodeResult {
 
   if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
     const text = new TextDecoder('utf-16le').decode(bytes.slice(2));
-    return { text, encoding: 'UTF-16LE', hasBom: true };
+    const garbledText = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    return { text, encoding: 'UTF-16LE', hasBom: true, garbledText };
   }
 
   if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
     const text = new TextDecoder('utf-16be').decode(bytes.slice(2));
-    return { text, encoding: 'UTF-16BE', hasBom: true };
+    const garbledText = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    return { text, encoding: 'UTF-16BE', hasBom: true, garbledText };
   }
 
   const detected = Encoding.detect(bytes);
@@ -30,8 +33,9 @@ export function detectAndDecode(bytes: Uint8Array): DecodeResult {
       from: detected,
     });
     const text = Encoding.codeToString(unicodeArray);
+    const garbledText = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
     const encodingName = detected === 'SJIS' ? 'Shift_JIS' : detected === 'EUCJP' ? 'EUC-JP' : 'ISO-2022-JP';
-    return { text, encoding: encodingName, hasBom: false };
+    return { text, encoding: encodingName, hasBom: false, garbledText };
   }
 
   const text = new TextDecoder('utf-8').decode(bytes);
