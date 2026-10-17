@@ -20,6 +20,7 @@ function App() {
     encoding,
     hasBom,
     table,
+    encodingFixed,
     history,
     findings,
     filteredFindings,
@@ -75,10 +76,12 @@ function App() {
           mergedCells: parsed.mergedCells,
         });
       } else {
-        const { text, encoding: detectedEncoding, hasBom: detectedBom } = detectAndDecode(bytes);
+        const { text, encoding: detectedEncoding, hasBom: detectedBom, garbledText } = detectAndDecode(bytes);
         const parsed = parseCSVWithMeta(text);
+        const garbledParsed = garbledText ? parseCSVWithMeta(garbledText) : null;
         setTable({
           table: parsed.table,
+          garbledTable: garbledParsed?.table,
           fileName: file.name,
           encoding: detectedEncoding,
           hasBom: detectedBom,
@@ -157,6 +160,9 @@ function App() {
                 table={table}
                 fileName={fileName || 'data.csv'}
                 historyLength={history.length}
+                encoding={encoding}
+                hasBom={hasBom}
+                encodingFixed={encodingFixed}
                 onUndo={undo}
                 onReset={reset}
               />
@@ -168,16 +174,24 @@ function App() {
                   checkpoints={checkpointStates}
                   findings={findings}
                   selectedCheckpointId={selectedCheckpointId}
+                  encodingFixed={encodingFixed}
                   onSelectCheckpoint={selectCheckpoint}
                 />
               </div>
 
               <div className="main-content">
                 <div className="grid-panel">
+                  {!encodingFixed && encoding !== 'UTF-8' && encoding !== 'Excel' && (
+                    <div className="mojibake-notice">
+                      <span className="mojibake-icon">⚠️</span>
+                      <span className="mojibake-text">
+                        文字化けしています。UTF-8だと思って読むとこうなります。手順1で変換しましょう。
+                      </span>
+                    </div>
+                  )}
                   <DataGrid
                     table={table}
                     highlightRanges={highlightRanges}
-                    previewTable={pendingFix?.previewTable}
                     onCellClick={handleCellClick}
                   />
                   {selectedCell && (
@@ -198,6 +212,7 @@ function App() {
                   onSelectFinding={selectFinding}
                   onPreviewFix={previewFix}
                   filterCheckpointId={selectedCheckpointId}
+                  encodingFixed={encodingFixed}
                 />
               </div>
             </div>

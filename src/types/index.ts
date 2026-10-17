@@ -35,6 +35,10 @@ export interface Fix {
   apply: (table: Table) => Table;
   deletedRows?: number[];
   deletedCols?: number[];
+  encodingConversion?: {
+    from: string;
+    hasBom: boolean;
+  };
 }
 
 export interface Finding {
@@ -68,6 +72,10 @@ export interface Check {
 export interface HistoryEntry {
   table: Table;
   mergedCells?: MergedCell[];
+  encoding?: string;
+  hasBom?: boolean;
+  correctTable?: Table | null;
+  encodingFixed?: boolean;
   appliedFix: {
     checkId: string;
     fixDescription: string;
@@ -79,7 +87,8 @@ export type CheckpointStatus =
   | { type: 'ok'; hasInfo: boolean }
   | { type: 'found'; count: number; scope?: { rows?: number; cols?: number } }
   | { type: 'fixed' }
-  | { type: 'unimplemented' };
+  | { type: 'unimplemented' }
+  | { type: 'pending-encoding'; message: string };
 
 export interface CheckpointState {
   id: string;

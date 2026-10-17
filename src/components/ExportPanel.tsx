@@ -6,15 +6,30 @@ interface ExportPanelProps {
   table: Table;
   fileName: string;
   historyLength: number;
+  encoding: string;
+  hasBom: boolean;
+  encodingFixed: boolean;
   onUndo: () => void;
   onReset: () => void;
 }
 
-export function ExportPanel({ table, fileName, historyLength, onUndo, onReset }: ExportPanelProps) {
-  const [withBom, setWithBom] = useState(false);
+function getEncodingDisplayName(encoding: string, hasBom: boolean): string {
+  if (hasBom) return `${encoding}（BOM付き）`;
+  return encoding;
+}
 
-  const handleExport = () => {
-    exportAsUTF8CSV(table, fileName, withBom);
+export function ExportPanel({ table, fileName, historyLength, encoding, hasBom, encodingFixed, onUndo, onReset }: ExportPanelProps) {
+  const [withBom, setWithBom] = useState(false);
+  const [showEncodingBlockedNotice, setShowEncodingBlockedNotice] = useState(false);
+  
+  const canExport = encodingFixed;
+
+  const handleExportClick = () => {
+    if (!canExport) {
+      setShowEncodingBlockedNotice(true);
+    } else {
+      exportAsUTF8CSV(table, fileName, withBom);
+    }
   };
 
   return (
@@ -44,10 +59,40 @@ export function ExportPanel({ table, fileName, historyLength, onUndo, onReset }:
           BOM付き（Excel用）
         </label>
 
-        <button className="export-button" onClick={handleExport}>
+        <button 
+          className={`export-button ${!canExport ? 'encoding-blocked' : ''}`}
+          onClick={handleExportClick}
+          title={!canExport ? `文字コードの修正が必要です` : ''}
+        >
           📥 UTF-8 CSVをエクスポート
         </button>
       </div>
+
+      {showEncodingBlockedNotice && (
+        <div className="encoding-notice-overlay">
+          <div className="encoding-notice-modal">
+            <h3>エクスポートできません</h3>
+            <p>
+              現在のデータは <strong>文字化け</strong> した状態で表示されています。
+            </p>
+            <p>
+              文字化けを解消するには、手順1「文字コード」の修正を先に適用してください。
+            </p>
+            <p className="encoding-notice-hint">
+              💡 元ファイルは <strong>{getEncodingDisplayName(encoding, hasBom)}</strong> です。
+              チェックリストの「文字コード」をクリックして、UTF-8への変換を適用してください。
+            </p>
+            <div className="encoding-notice-actions">
+              <button 
+                className="encoding-notice-primary"
+                onClick={() => setShowEncodingBlockedNotice(false)}
+              >
+                手順1へ戻る
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,11 @@ interface CheckPanelProps {
   onSelectFinding: (finding: Finding | null) => void;
   onPreviewFix: (finding: Finding) => void;
   filterCheckpointId?: string | null;
+  encodingFixed: boolean;
+}
+
+export function isCheckPendingEncoding(checkId: string, encodingFixed: boolean): boolean {
+  return !encodingFixed && checkId !== 'encoding';
 }
 
 export function CheckPanel({
@@ -16,6 +21,7 @@ export function CheckPanel({
   onSelectFinding,
   onPreviewFix,
   filterCheckpointId,
+  encodingFixed,
 }: CheckPanelProps) {
   const implementedCheckpoints = checkpointRegistry.filter(cp => cp.check !== null);
 
@@ -37,32 +43,38 @@ export function CheckPanel({
         )}
       </h2>
 
-      {findingsByCheck.map(({ checkpoint, findings: checkFindings }) => (
-        <div key={checkpoint.id} className="check-section">
-          <div className="check-header">
-            <h3 className="check-title">{checkpoint.name}</h3>
-            <p className="check-description">{checkpoint.description}</p>
-          </div>
+      {findingsByCheck.map(({ checkpoint, findings: checkFindings }) => {
+        const isPending = isCheckPendingEncoding(checkpoint.id, encodingFixed);
 
-          <div className="findings-list">
-            {checkFindings.length === 0 ? (
-              <div className="no-findings">検出なし</div>
-            ) : (
-              checkFindings.map((finding, index) => (
-                <FindingItem
-                  key={`${finding.checkId}-${index}`}
-                  finding={finding}
-                  isSelected={selectedFinding === finding}
-                  onSelect={() => onSelectFinding(
-                    selectedFinding === finding ? null : finding
-                  )}
-                  onPreviewFix={() => onPreviewFix(finding)}
-                />
-              ))
-            )}
+        return (
+          <div key={checkpoint.id} className="check-section">
+            <div className="check-header">
+              <h3 className="check-title">{checkpoint.name}</h3>
+              <p className="check-description">{checkpoint.description}</p>
+            </div>
+
+            <div className="findings-list">
+              {isPending ? (
+                <div className="no-findings pending-encoding-note">手順1で文字コードを変換すると、ここにチェック結果が出ます</div>
+              ) : checkFindings.length === 0 ? (
+                <div className="no-findings">検出なし</div>
+              ) : (
+                checkFindings.map((finding, index) => (
+                  <FindingItem
+                    key={`${finding.checkId}-${index}`}
+                    finding={finding}
+                    isSelected={selectedFinding === finding}
+                    onSelect={() => onSelectFinding(
+                      selectedFinding === finding ? null : finding
+                    )}
+                    onPreviewFix={() => onPreviewFix(finding)}
+                  />
+                ))
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
