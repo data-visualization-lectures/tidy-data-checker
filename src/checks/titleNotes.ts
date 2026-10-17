@@ -38,7 +38,7 @@ interface RowClassification {
   unitValue?: string;
 }
 
-function classifyRow(row: string[]): RowClassification {
+export function classifyRow(row: string[]): RowClassification {
   const nonEmptyCells = row.filter(cell => cell.trim() !== '');
   if (nonEmptyCells.length === 0) {
     return { type: 'data', content: '' };
@@ -71,7 +71,7 @@ function classifyRow(row: string[]): RowClassification {
   return { type: 'data', content: fullRow };
 }
 
-function findDataStartRow(table: Table): number {
+export function findDataStartRow(table: Table): number {
   let consecutiveDataRows = 0;
   for (let i = 0; i < table.length; i++) {
     const classification = classifyRow(table[i]);
@@ -90,7 +90,7 @@ function findDataStartRow(table: Table): number {
   return 0;
 }
 
-function findDataEndRow(table: Table): number {
+export function findDataEndRow(table: Table): number {
   for (let i = table.length - 1; i >= 0; i--) {
     const classification = classifyRow(table[i]);
     if (classification.type === 'data') {
