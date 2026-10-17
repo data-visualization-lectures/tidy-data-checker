@@ -99,14 +99,19 @@ describe('totalsCheck', () => {
 
     const finding = warnings(totalsCheck.detect(table, ctx), 'grand')[0];
     expect(finding).toBeDefined();
-    expect(finding.metadata).toMatchObject({ kind: 'grand', rows: [3], labels: ['合計'] });
+    expect(finding.metadata).toMatchObject({
+      kind: 'grand',
+      rows: [3],
+      labels: ['合計'],
+      verifiedRows: [3],
+    });
     expect(finding.ranges).toEqual([
       { startRow: 3, startCol: 0, endRow: 3, endCol: 1 },
     ]);
     expect(finding.fix?.description).toBe('集計行を削除（行 4）');
     expect(finding.fix?.deletedRows).toEqual([3]);
     expect(finding.message).toContain('行 4「合計」');
-    expect(finding.message).not.toContain('一致しました');
+    expect(finding.message).toContain('行 4「合計」はほかの行の合計と一致しました。');
 
     const applied = finding.fix!.apply(table);
     expect(applied).toEqual([
@@ -216,7 +221,7 @@ describe('totalsCheck', () => {
       kind: 'total-column',
       cols: [1],
       labels: ['総数'],
-      verifiedCols: [],
+      verifiedCols: [1],
     });
     expect(finding.ranges).toEqual([
       { startRow: 0, startCol: 1, endRow: 3, endCol: 1 },
@@ -224,6 +229,7 @@ describe('totalsCheck', () => {
     expect(finding.fix?.description).toBe('合計列を削除（列 B）');
     expect(finding.fix?.deletedCols).toEqual([1]);
     expect(finding.message).toContain('列 B「総数」');
+    expect(finding.message).toContain('列 B「総数」はほかの列の合計と一致しました。');
 
     const applied = finding.fix!.apply(table);
     expect(applied).toEqual([
@@ -326,9 +332,129 @@ describe('totalsCheck', () => {
       labels: ['総数', '総数'],
     });
     expect(finding.fix?.description).toBe('集計行を削除（行 2, 5）');
+    expect(finding.message).not.toContain('一致しました');
+    expect(finding.metadata).toMatchObject({ verifiedRows: [] });
 
     const applied = finding.fix!.apply(table);
     expect(applied.map(row => row[1])).toEqual(['性別', '男', '女', '男', '女']);
+  });
+
+  it('12. 合計が内訳の和と一致すると「一致しました」が入り、一致しなくても検出はされる', () => {
+    const matchedGrand: Table = [
+      ['品目', '数量', '備考'],
+      ['りんご', '10', 'x'],
+      ['みかん', '20', '5'],
+      ['合計', '30', '15'],
+    ];
+    const mismatchedGrand: Table = [
+      ['品目', '数量', '備考'],
+      ['りんご', '10', 'x'],
+      ['みかん', '20', '5'],
+      ['合計', '99', '15'],
+    ];
+
+    const matchedFindings = warnings(totalsCheck.detect(matchedGrand, ctx));
+    const mismatchedFindings = warnings(totalsCheck.detect(mismatchedGrand, ctx));
+    expect(matchedFindings.map(f => f.metadata?.kind)).toEqual(['grand']);
+    expect(mismatchedFindings.map(f => f.metadata?.kind)).toEqual(['grand']);
+    expect(matchedFindings.map(f => f.metadata?.rows)).toEqual(mismatchedFindings.map(f => f.metadata?.rows));
+
+    expect(matchedFindings[0].message).toContain('行 4「合計」はほかの行の合計と一致しました。');
+    expect(matchedFindings[0].metadata).toMatchObject({ verifiedRows: [3] });
+    expect(mismatchedFindings[0].message).not.toContain('一致しました');
+    expect(mismatchedFindings[0].metadata).toMatchObject({ rows: [3], labels: ['合計'], verifiedRows: [] });
+
+    const rounded: Table = [
+      ['品目', '数量'],
+      ['りんご', '1.2'],
+      ['みかん', '1.4'],
+      ['合計', '2.7'],
+    ];
+    const roundedOff: Table = [
+      ['品目', '数量'],
+      ['りんご', '1.2'],
+      ['みかん', '1.4'],
+      ['合計', '2.8'],
+    ];
+    const roundedFinding = warnings(totalsCheck.detect(rounded, ctx), 'grand')[0];
+    const roundedOffFinding = warnings(totalsCheck.detect(roundedOff, ctx), 'grand')[0];
+    expect(roundedFinding.metadata).toMatchObject({ rows: [3], verifiedRows: [3] });
+    expect(roundedFinding.message).toContain('一致しました');
+    expect(roundedOffFinding.metadata).toMatchObject({ rows: [3], verifiedRows: [] });
+    expect(roundedOffFinding.message).not.toContain('一致しました');
+    expect(warnings(totalsCheck.detect(rounded, ctx))).toHaveLength(
+      warnings(totalsCheck.detect(roundedOff, ctx)).length,
+    );
+
+    const relative: Table = [
+      ['品目', '数量'],
+      ['りんご', '40,000'],
+      ['みかん', '60,000'],
+      ['合計', '100,050'],
+    ];
+    const relativeOff: Table = [
+      ['品目', '数量'],
+      ['りんご', '40000'],
+      ['みかん', '60000'],
+      ['合計', '100200'],
+    ];
+    expect(warnings(totalsCheck.detect(relative, ctx), 'grand')[0].metadata).toMatchObject({
+      verifiedRows: [3],
+    });
+    expect(warnings(totalsCheck.detect(relativeOff, ctx), 'grand')[0].metadata).toMatchObject({
+      rows: [3],
+      verifiedRows: [],
+    });
+
+    const scaled: Table = [
+      ['品目', '数量'],
+      ['りんご', '１.２万'],
+      ['みかん', '-2,000'],
+      ['合計', '10,000'],
+    ];
+    const scaledFinding = warnings(totalsCheck.detect(scaled, ctx), 'grand')[0];
+    expect(scaledFinding.metadata).toMatchObject({ rows: [3], verifiedRows: [3] });
+    expect(scaledFinding.message).toContain('一致しました');
+
+    const subtotalBelow: Table = [
+      ['地域', '人口'],
+      ['東北計', '250'],
+      ['青森', '80'],
+      ['岩手', '70'],
+      ['宮城', '100'],
+    ];
+    const subtotalBelowOff: Table = [
+      ['地域', '人口'],
+      ['東北計', '999'],
+      ['青森', '80'],
+      ['岩手', '70'],
+      ['宮城', '100'],
+    ];
+    const below = warnings(totalsCheck.detect(subtotalBelow, ctx), 'subtotal')[0];
+    const belowOff = warnings(totalsCheck.detect(subtotalBelowOff, ctx), 'subtotal')[0];
+    expect(below.metadata).toMatchObject({ rows: [1], labels: ['東北計'], verifiedRows: [1] });
+    expect(below.message).toContain('行 2「東北計」はほかの行の合計と一致しました。');
+    expect(belowOff.metadata).toMatchObject({ rows: [1], labels: ['東北計'], verifiedRows: [] });
+    expect(belowOff.message).not.toContain('一致しました');
+    expect(warnings(totalsCheck.detect(subtotalBelow, ctx), 'subtotal')).toHaveLength(1);
+    expect(warnings(totalsCheck.detect(subtotalBelowOff, ctx), 'subtotal')).toHaveLength(1);
+
+    const columnRows = (totals: string[]): Table => [
+      ['地域', '総数', '男', '女'],
+      ...totals.map((total, index) => [String.fromCharCode(65 + index), total, '4', '6']),
+    ];
+    // 4/5 行は 80%。3/5 行は届かない。どちらも合計列としては検出される
+    const columnOnTable = columnRows(['10', '10', '10', '10', '99']);
+    const columnOffTable = columnRows(['10', '10', '10', '99', '99']);
+    const columnOn = warnings(totalsCheck.detect(columnOnTable, ctx), 'total-column')[0];
+    const columnOff = warnings(totalsCheck.detect(columnOffTable, ctx), 'total-column')[0];
+    expect(columnOn.metadata).toMatchObject({ cols: [1], labels: ['総数'], verifiedCols: [1] });
+    expect(columnOn.message).toContain('列 B「総数」はほかの列の合計と一致しました。');
+    expect(columnOff.metadata).toMatchObject({ cols: [1], labels: ['総数'], verifiedCols: [] });
+    expect(columnOff.message).not.toContain('一致しました');
+    expect(warnings(totalsCheck.detect(columnOnTable, ctx)).map(f => f.metadata?.kind)).toEqual(
+      warnings(totalsCheck.detect(columnOffTable, ctx)).map(f => f.metadata?.kind),
+    );
   });
 
   it('13. 見出し行の合計という文字は集計行として扱わない', () => {
@@ -443,20 +569,22 @@ describe('totalsCheck', () => {
       'total-column',
     ]);
     expect(findings.filter(f => f.severity === 'info')).toHaveLength(0);
-    expect(findings.every(f => !f.message.includes('一致しました'))).toBe(true);
-
     expect(findings[0].metadata).toMatchObject({
       rows: [1],
       labels: ['全国'],
-      verifiedRows: [],
+      verifiedRows: [1],
     });
     expect(findings[0].message).toContain('行 2「全国」');
-    expect(findings[1].metadata).toMatchObject({ rows: [6], labels: ['東北計'] });
+    expect(findings[0].message).toContain('行 2「全国」はほかの行の合計と一致しました。');
+    expect(findings[1].metadata).toMatchObject({ rows: [6], labels: ['東北計'], verifiedRows: [6] });
     expect(findings[1].message).toContain('行 7「東北計」');
-    expect(findings[2].metadata).toMatchObject({ rows: [7], labels: ['（再掲）政令市'] });
+    expect(findings[1].message).toContain('行 7「東北計」はほかの行の合計と一致しました。');
+    expect(findings[2].metadata).toMatchObject({ rows: [7], labels: ['（再掲）政令市'], verifiedRows: [] });
     expect(findings[2].message).toContain('行 8「（再掲）政令市」');
-    expect(findings[3].metadata).toMatchObject({ cols: [2], labels: ['総数'], verifiedCols: [] });
+    expect(findings[2].message).not.toContain('一致しました');
+    expect(findings[3].metadata).toMatchObject({ cols: [2], labels: ['総数'], verifiedCols: [2] });
     expect(findings[3].message).toContain('列 C「総数」');
+    expect(findings[3].message).toContain('列 C「総数」はほかの列の合計と一致しました。');
     expect(findings[3].fix?.description).toBe('合計列を削除（列 C）');
 
     let current = table;
