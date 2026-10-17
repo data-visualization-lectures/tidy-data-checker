@@ -1,7 +1,7 @@
 import type { Check, Finding, Table, CheckContext, Fix, CellRange } from '../types';
 import { getColumnLabel, getDataRegion, isDataRow, type DataRegion } from '../utils/dataRegion';
 import { formatColList, formatRowList, toColLetter } from '../utils/cellRef';
-import { classifyColumns, nfkcCompact, type ColumnKind } from '../utils/values';
+import { classifyColumns, nfkcCompact, parseNumericCell, type ColumnKind } from '../utils/values';
 
 export type TotalKind = 'grand' | 'subtotal' | 'restated';
 
@@ -196,6 +196,239 @@ function findTotalCols(
   return found;
 }
 
+const MULTIPLIER: Record<string, { factor: number; exponent: number }> = {
+  '': { factor: 1, exponent: 0 },
+  千: { factor: 1e3, exponent: 3 },
+  万: { factor: 1e4, exponent: 4 },
+  億: { factor: 1e8, exponent: 8 },
+  兆: { factor: 1e12, exponent: 12 },
+};
+
+interface NumericReading {
+  value: number;
+  decimals: number;
+}
+
+/** 検算用。parseNumericCell で読める値だけを、単位の倍率を掛けた数にする */
+function readNumber(raw: string): NumericReading | null {
+  const parsed = parseNumericCell(raw);
+  if (!parsed) return null;
+  const magnitude = Number(parsed.digits);
+  if (!Number.isFinite(magnitude)) return null;
+  const scale = MULTIPLIER[parsed.multiplier] ?? MULTIPLIER[''];
+  const dot = parsed.digits.indexOf('.');
+  const fractionDigits = dot < 0 ? 0 : parsed.digits.length - dot - 1;
+  return {
+    value: (parsed.sign === '-' ? -1 : 1) * magnitude * scale.factor,
+    decimals: Math.max(0, fractionDigits - scale.exponent),
+  };
+}
+
+/**
+ * |Σ − v| ≤ max(0.5 × n × 10^(−d), 0.001 × |v|)
+ * 10進の境界が2進小数でわずかに超えないよう、1e-9 だけ余裕を持たせる。
+ */
+function withinTolerance(sum: number, value: number, addends: number, decimals: number): boolean {
+  const diff = Math.abs(sum - value);
+  const rounding = 0.5 * addends * 10 ** -decimals;
+  const relative = 0.001 * Math.abs(value);
+  return diff <= Math.max(rounding, relative) + 1e-9;
+}
+
+function numericColIndexes(kinds: ColumnKind[]): number[] {
+  const cols: number[] = [];
+  for (let col = 0; col < kinds.length; col++) {
+    if (kinds[col] === 'numeric') cols.push(col);
+  }
+  return cols;
+}
+
+interface ColumnRun {
+  sums: number[];
+  decimals: number[];
+  total: number;
+}
+
+/** 先頭から読める行だけ累積する。記号・空欄で途切れた列は、それより先の k では比べない */
+function buildColumnRuns(
+  table: Table,
+  totalRow: number,
+  partRows: number[],
+  cols: number[],
+  minK: number,
+): ColumnRun[] {
+  const runs: ColumnRun[] = [];
+  for (const col of cols) {
+    const total = readNumber(table[totalRow]?.[col] ?? '');
+    if (!total) continue;
+    const sums: number[] = [];
+    const decimals: number[] = [];
+    let sum = 0;
+    let decimalsSoFar = total.decimals;
+    for (const row of partRows) {
+      const part = readNumber(table[row]?.[col] ?? '');
+      if (!part) break;
+      sum += part.value;
+      decimalsSoFar = Math.max(decimalsSoFar, part.decimals);
+      sums.push(sum);
+      decimals.push(decimalsSoFar);
+    }
+    if (sums.length >= minK) {
+      runs.push({ sums, decimals, total: total.value });
+    }
+  }
+  return runs;
+}
+
+/** 一致した列が1つ以上、一致しない列が0なら true。比べられる列がなければ null */
+function matchAnyK(runs: ColumnRun[], minK: number, maxK: number): boolean | null {
+  if (runs.length === 0 || maxK < minK) return null;
+  let sawMismatch = false;
+  for (let k = minK; k <= maxK; k++) {
+    let matched = 0;
+    let mismatched = 0;
+    for (const run of runs) {
+      if (run.sums.length < k) continue;
+      if (withinTolerance(run.sums[k - 1], run.total, k, run.decimals[k - 1])) matched++;
+      else mismatched++;
+    }
+    if (matched >= 1 && mismatched === 0) return true;
+    if (mismatched > 0) sawMismatch = true;
+  }
+  return sawMismatch ? false : null;
+}
+
+function verifyGrandRow(
+  table: Table,
+  region: DataRegion,
+  cand: TotalRowCandidate,
+  candidateRows: Set<number>,
+  kinds: ColumnKind[],
+): boolean | null {
+  const partRows: number[] = [];
+  for (let row = region.firstDataRow; row <= region.lastDataRow; row++) {
+    if (!isDataRow(table, row, region) || candidateRows.has(row)) continue;
+    partRows.push(row);
+  }
+  if (partRows.length === 0) return null;
+  const runs = buildColumnRuns(table, cand.row, partRows, numericColIndexes(kinds), partRows.length);
+  return matchAnyK(runs, partRows.length, partRows.length);
+}
+
+/** 直上（なければ直下）の連続したデータ行について、近い方から k 行（k ≥ 2）の和を見る */
+function collectAdjacentRows(
+  table: Table,
+  region: DataRegion,
+  start: number,
+  step: number,
+  candidateRows: Set<number>,
+): number[] {
+  const rows: number[] = [];
+  for (let row = start; row >= region.firstDataRow && row <= region.lastDataRow; row += step) {
+    if (!isDataRow(table, row, region) || candidateRows.has(row)) break;
+    rows.push(row);
+  }
+  return rows;
+}
+
+function verifySubtotalRow(
+  table: Table,
+  region: DataRegion,
+  cand: TotalRowCandidate,
+  candidateRows: Set<number>,
+  kinds: ColumnKind[],
+): boolean | null {
+  const cols = numericColIndexes(kinds);
+  const above = collectAdjacentRows(table, region, cand.row - 1, -1, candidateRows);
+  const below = collectAdjacentRows(table, region, cand.row + 1, 1, candidateRows);
+  let sawMismatch = false;
+  for (const run of [above, below]) {
+    const columnRuns = buildColumnRuns(table, cand.row, run, cols, 2);
+    const result = matchAnyK(columnRuns, 2, run.length);
+    if (result === true) return true;
+    if (result === false) sawMismatch = true;
+  }
+  return sawMismatch ? false : null;
+}
+
+function verifyTotalRow(
+  table: Table,
+  region: DataRegion,
+  cand: TotalRowCandidate,
+  candidateRows: Set<number>,
+  kinds: ColumnKind[],
+): boolean | null {
+  if (cand.kind === 'grand') return verifyGrandRow(table, region, cand, candidateRows, kinds);
+  if (cand.kind === 'subtotal') return verifySubtotalRow(table, region, cand, candidateRows, kinds);
+  return null;
+}
+
+/** 列名の "_" より前（`人口_総数` → `人口_`）。無ければ null */
+function columnPrefix(label: string): string | null {
+  const normalized = label.normalize('NFKC');
+  const index = normalized.lastIndexOf('_');
+  if (index <= 0) return null;
+  return normalized.slice(0, index + 1);
+}
+
+function columnHasBlockedCell(table: Table, rows: number[], col: number): boolean {
+  for (const row of rows) {
+    const raw = table[row]?.[col] ?? '';
+    if (raw.trim() === '') continue;
+    if (readNumber(raw) === null) return true;
+  }
+  return false;
+}
+
+function verifyTotalCol(
+  table: Table,
+  region: DataRegion,
+  cand: TotalColCandidate,
+  kinds: ColumnKind[],
+  totalCols: Set<number>,
+): boolean | null {
+  const dataRows: number[] = [];
+  for (let row = region.firstDataRow; row <= region.lastDataRow; row++) {
+    if (isDataRow(table, row, region)) dataRows.push(row);
+  }
+  if (dataRows.length === 0) return null;
+
+  const prefix = columnPrefix(cand.label);
+  const partCols: number[] = [];
+  for (let col = 0; col < kinds.length; col++) {
+    if (kinds[col] !== 'numeric' || col === cand.col || totalCols.has(col)) continue;
+    if (prefix !== null && !getColumnLabel(table, col, region).normalize('NFKC').startsWith(prefix)) continue;
+    if (columnHasBlockedCell(table, dataRows, col)) continue;
+    partCols.push(col);
+  }
+  if (partCols.length === 0) return null;
+
+  let matched = 0;
+  let comparable = 0;
+  for (const row of dataRows) {
+    const total = readNumber(table[row]?.[cand.col] ?? '');
+    if (!total) continue;
+    let sum = 0;
+    let decimals = total.decimals;
+    let readable = true;
+    for (const col of partCols) {
+      const part = readNumber(table[row]?.[col] ?? '');
+      if (!part) {
+        readable = false;
+        break;
+      }
+      sum += part.value;
+      decimals = Math.max(decimals, part.decimals);
+    }
+    if (!readable) continue;
+    comparable++;
+    if (withinTolerance(sum, total.value, partCols.length, decimals)) matched++;
+  }
+  if (comparable === 0) return null;
+  // 80% はデータ行全体に対して見る。読めない行は一致に数えない
+  return matched * 5 >= dataRows.length * 4;
+}
+
 function createRemoveRowsFix(rows: number[], what: string): Fix {
   const sorted = [...rows].sort((a, b) => a - b);
   const drop = new Set(sorted);
@@ -251,33 +484,56 @@ const ROW_FINDING_TEXT: Record<TotalKind, { what: string; message: (count: numbe
   },
 };
 
-function rowFinding(kind: TotalKind, candidates: TotalRowCandidate[], maxCols: number): Finding {
+function rowVerifiedClause(row: number, label: string): string {
+  return `行 ${row + 1}「${label}」はほかの行の合計と一致しました。`;
+}
+
+function rowFinding(
+  kind: TotalKind,
+  candidates: TotalRowCandidate[],
+  maxCols: number,
+  verifiedRows: number[],
+): Finding {
   const ordered = [...candidates].sort((a, b) => a.row - b.row);
   const rows = ordered.map(candidate => candidate.row);
   const labels = ordered.map(candidate => candidate.label);
+  const verified = new Set(verifiedRows);
+  const verifiedOrdered = ordered.filter(candidate => verified.has(candidate.row));
   const text = ROW_FINDING_TEXT[kind];
+  const clauses = verifiedOrdered.map(candidate => rowVerifiedClause(candidate.row, candidate.label)).join('');
   return {
     checkId: 'totals',
     severity: 'warning',
     ranges: rowRanges(rows, maxCols),
-    message: text.message(ordered.length, formatLabeledRows(ordered)),
+    message: text.message(ordered.length, formatLabeledRows(ordered)) + clauses,
     fix: createRemoveRowsFix(rows, text.what),
     metadata: {
       kind,
       rows,
       labels,
-      verifiedRows: [],
+      verifiedRows: verifiedOrdered.map(candidate => candidate.row),
     },
   };
 }
 
-function columnFinding(candidates: TotalColCandidate[], tableLength: number): Finding {
+function columnVerifiedClause(col: number, label: string): string {
+  return `列 ${toColLetter(col)}「${label}」はほかの列の合計と一致しました。`;
+}
+
+function columnFinding(
+  candidates: TotalColCandidate[],
+  tableLength: number,
+  verifiedCols: number[],
+): Finding {
   const ordered = [...candidates].sort((a, b) => a.col - b.col);
   const cols = ordered.map(candidate => candidate.col);
   const labels = ordered.map(candidate => candidate.label);
+  const verified = new Set(verifiedCols);
+  const verifiedOrdered = ordered.filter(candidate => verified.has(candidate.col));
   const labeled = ordered
     .map(candidate => `列 ${toColLetter(candidate.col)}「${candidate.label}」`)
     .join(', ');
+  const clauses = verifiedOrdered.map(candidate => columnVerifiedClause(candidate.col, candidate.label)).join('');
   const endRow = Math.max(0, tableLength - 1);
   return {
     checkId: 'totals',
@@ -288,13 +544,13 @@ function columnFinding(candidates: TotalColCandidate[], tableLength: number): Fi
       endRow,
       endCol: col,
     })),
-    message: `${ordered.length} 個の合計列が見つかりました（${labeled}）。ほかの列から計算できる値なので、横持ち→縦持ち（手順10）の前に除いておくと安全です。`,
+    message: `${ordered.length} 個の合計列が見つかりました（${labeled}）。ほかの列から計算できる値なので、横持ち→縦持ち（手順10）の前に除いておくと安全です。${clauses}`,
     fix: createRemoveColsFix(cols),
     metadata: {
       kind: 'total-column',
       cols,
       labels,
-      verifiedCols: [],
+      verifiedCols: verifiedOrdered.map(candidate => candidate.col),
     },
   };
 }
@@ -330,13 +586,28 @@ export const totalsCheck: Check = {
     const kinds = classifyColumns(table, region);
     const { rows, headings } = findTotalRows(table, region, findLabelCols(kinds));
     const totalCols = findTotalCols(table, region, kinds);
+    const candidateRows = new Set<number>();
+    for (const candidate of rows) candidateRows.add(candidate.row);
+    for (const candidate of headings) candidateRows.add(candidate.row);
+    const totalColIndexes = new Set(totalCols.map(candidate => candidate.col));
 
     const findings: Finding[] = [];
     for (const kind of ['grand', 'subtotal', 'restated'] as const) {
       const matched = rows.filter(candidate => candidate.kind === kind);
-      if (matched.length > 0) findings.push(rowFinding(kind, matched, region.maxCols));
+      if (matched.length === 0) continue;
+      const verifiedRows = kind === 'restated'
+        ? []
+        : matched
+          .filter(candidate => verifyTotalRow(table, region, candidate, candidateRows, kinds) === true)
+          .map(candidate => candidate.row);
+      findings.push(rowFinding(kind, matched, region.maxCols, verifiedRows));
     }
-    if (totalCols.length > 0) findings.push(columnFinding(totalCols, table.length));
+    if (totalCols.length > 0) {
+      const verifiedCols = totalCols
+        .filter(candidate => verifyTotalCol(table, region, candidate, kinds, totalColIndexes) === true)
+        .map(candidate => candidate.col);
+      findings.push(columnFinding(totalCols, table.length, verifiedCols));
+    }
     if (headings.length > 0) findings.push(headingFinding(headings, region.maxCols));
     if (findings.length === 0) findings.push(notFoundFinding());
     return findings;
