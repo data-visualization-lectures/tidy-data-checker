@@ -290,14 +290,14 @@ describe('formatNumberCheck', () => {
     expect(detect(done)[0]?.fix).toBeUndefined();
   });
 
-  it('with-number-formats.csv は全角と桁区切りの2件で、適用後もコード列の先頭 0 が残る', () => {
+  it('with-number-formats.csv の全角と桁区切りを適用してもコード列の先頭 0 が残る', () => {
     const text = readFileSync(join(__dirname, 'fixtures/with-number-formats.csv'), 'utf8');
     const { table } = parseCSVWithMeta(text);
     const body = table.filter(row => row.some(cell => cell.trim() !== ''));
 
     const findings = detect(body);
     const warnings = findings.filter(f => f.severity === 'warning');
-    expect(warnings.map(f => f.metadata?.kind)).toEqual(['fullwidth', 'separator']);
+    expect(warnings.map(f => f.metadata?.kind)).toEqual(['fullwidth', 'separator', 'unit']);
 
     const fullwidth = byKind(findings, 'fullwidth')!;
     const separator = byKind(findings, 'separator')!;
@@ -316,5 +316,299 @@ describe('formatNumberCheck', () => {
     ]);
     expect(fixed.slice(1).map(row => row[0])).toEqual(['01', '02', '03']);
     expect(fixed[1][3]).toBe('1121.26km²');
+  });
+
+  it('6. 同じ単位はセルから外れ、見出しが 人口（人） になる。既にある単位は見出しを変えない', () => {
+    const table: Table = [
+      ['人口'],
+      ['100人'],
+      ['200人'],
+    ];
+    const findings = detect(table);
+    const unit = byKind(findings, 'unit');
+    expect(unit?.severity).toBe('warning');
+    expect(unit?.message).toBe(
+      '1 個の列で、セルの中に単位が書かれています（列 A「人」）。単位を見出しに移すと、値を数値として扱えます。'
+    );
+    expect(unit?.fix?.description).toBe('単位を見出しに移す（列 A）');
+    expect(unit?.metadata).toEqual({
+      kind: 'unit',
+      columns: [{ col: 0, mode: 'strip', unit: '人', header: '人口（人）' }],
+    });
+    expect(unit?.ranges).toEqual([
+      { startRow: 0, startCol: 0, endRow: 2, endCol: 0 },
+    ]);
+    expect(findings.some(f => f.message === '全角数字・桁区切り・単位の問題は見つかりませんでした。')).toBe(false);
+
+    const snapshot = table.map(row => row.slice());
+    const fixed = unit!.fix!.apply(table);
+    expect(table).toEqual(snapshot);
+    expect(fixed).toEqual([
+      ['人口（人）'],
+      ['100'],
+      ['200'],
+    ]);
+    expect(byKind(detect(fixed), 'unit')).toBeUndefined();
+    expect(unit!.fix!.apply(fixed)).toEqual(fixed);
+
+    const already: Table = [
+      ['人口（人）'],
+      ['100人'],
+      ['200人'],
+    ];
+    const alreadyFixed = byKind(detect(already), 'unit')!.fix!.apply(already);
+    expect(alreadyFixed).toEqual([
+      ['人口（人）'],
+      ['100'],
+      ['200'],
+    ]);
+
+    const halfParen: Table = [
+      ['人口(人)'],
+      ['100人'],
+      ['200人'],
+    ];
+    expect(byKind(detect(halfParen), 'unit')!.fix!.apply(halfParen)[0][0]).toBe('人口(人)');
+
+    const emptyHeader: Table = [
+      ['コード', '名前', ''],
+      ['01', 'A', '5人'],
+      ['02', 'B', '6人'],
+    ];
+    expect(applyKind(emptyHeader, 'unit')).toEqual([
+      ['コード', '名前', '列3（人）'],
+      ['01', 'A', '5'],
+      ['02', 'B', '6'],
+    ]);
+  });
+
+  it('7. % の列は見出しが 割合（%） になり、値は 11.6 のまま', () => {
+    const table: Table = [
+      ['年齢区分', '割合'],
+      ['0〜14歳', '11.6%'],
+      ['15〜64歳', '59.4%'],
+      ['65歳以上', '29.0%'],
+    ];
+
+    const unit = byKind(detect(table), 'unit');
+    expect(unit?.metadata).toEqual({
+      kind: 'unit',
+      columns: [{ col: 1, mode: 'strip', unit: '%', header: '割合（%）' }],
+    });
+    expect(unit?.fix?.apply(table)).toEqual([
+      ['年齢区分', '割合（%）'],
+      ['0〜14歳', '11.6'],
+      ['15〜64歳', '59.4'],
+      ['65歳以上', '29.0'],
+    ]);
+    expect(unit?.fix?.apply(table)[1][1]).toBe('11.6');
+  });
+
+  it('8. 倍率の混在は基本単位にそろえ、見出しは （人）', () => {
+    const table: Table = [
+      ['地域', '人口'],
+      ['A市', '1.2万人'],
+      ['B町', '8,000人'],
+      ['C村', '950人'],
+    ];
+
+    const findings = detect(table);
+    const unit = byKind(findings, 'unit');
+    expect(unit?.metadata).toEqual({
+      kind: 'unit',
+      columns: [{ col: 1, mode: 'normalize', unit: '人', header: '人口（人）' }],
+    });
+    expect(byKind(findings, 'separator')?.metadata).toMatchObject({ count: 1, cols: [1] });
+
+    const expected: Table = [
+      ['地域', '人口（人）'],
+      ['A市', '12000'],
+      ['B町', '8000'],
+      ['C村', '950'],
+    ];
+    expect(unit?.fix?.apply(table)).toEqual(expected);
+    expect(applyKind(applyKind(table, 'separator'), 'unit')).toEqual(expected);
+    const afterUnit = applyKind(table, 'unit');
+    expect(byKind(detect(afterUnit), 'separator')).toBeUndefined();
+    expect(afterUnit).toEqual(expected);
+
+    const withPlain: Table = [
+      ['地域', '人口'],
+      ['A市', '8000'],
+      ['B町', '1.2万人'],
+      ['C村', '950人'],
+    ];
+    expect(applyKind(withPlain, 'unit')).toEqual([
+      ['地域', '人口（人）'],
+      ['A市', '8000'],
+      ['B町', '12000'],
+      ['C村', '950'],
+    ]);
+  });
+
+  it('9. すべて 万人 の列は数値を変えず、見出しが （万人）', () => {
+    const table: Table = [
+      ['地域', '人口'],
+      ['A市', '1.2万人'],
+      ['B町', '0.8万人'],
+    ];
+
+    const unit = byKind(detect(table), 'unit');
+    expect(unit?.metadata).toMatchObject({
+      columns: [{ col: 1, mode: 'strip', unit: '万人', header: '人口（万人）' }],
+    });
+    expect(unit?.fix?.apply(table)).toEqual([
+      ['地域', '人口（万人）'],
+      ['A市', '1.2'],
+      ['B町', '0.8'],
+    ]);
+  });
+
+  it('10. 単位そのものが違う列は直さず info を出す', () => {
+    const table: Table = [
+      ['項目', '値'],
+      ['人口', '1,234人'],
+      ['構成比', '12.5%'],
+    ];
+
+    const findings = detect(table);
+    expect(byKind(findings, 'unit')).toBeUndefined();
+    const mixed = byKind(findings, 'mixed-unit');
+    expect(mixed?.severity).toBe('info');
+    expect(mixed?.fix).toBeUndefined();
+    expect(mixed?.message).toBe(
+      '列 B は単位がそろっていません（人, %）。意味の違う値（実数と割合など）が1つの列に混ざっている可能性があります。'
+    );
+    expect(mixed?.metadata).toEqual({
+      kind: 'mixed-unit',
+      columns: [{ col: 1, units: ['人', '%'] }],
+    });
+
+    const separator = byKind(findings, 'separator');
+    expect(separator?.ranges).toEqual([
+      { startRow: 1, startCol: 1, endRow: 1, endCol: 1 },
+    ]);
+    const commasRemoved = separator!.fix!.apply(table);
+    expect(commasRemoved[1][1]).toBe('1234人');
+    expect(commasRemoved[2][1]).toBe('12.5%');
+    const again = detect(commasRemoved);
+    expect(byKind(again, 'unit')).toBeUndefined();
+    expect(byKind(again, 'mixed-unit')?.message).toContain('人, %');
+  });
+
+  it('11. 20～24歳、65歳以上、2020年、4月 は単位付き数値として扱わない', () => {
+    const table: Table = [
+      ['区分', '人数'],
+      ['20～24歳', '15人'],
+      ['65歳以上', '40人'],
+      ['2020年', '3人'],
+      ['4月', '1人'],
+    ];
+
+    const findings = detect(table);
+    expect(byKind(findings, 'mixed-unit')).toBeUndefined();
+    const unit = byKind(findings, 'unit');
+    expect(unit?.metadata).toMatchObject({
+      columns: [{ col: 1, mode: 'strip', unit: '人', header: '人数（人）' }],
+    });
+    expect(unit?.fix?.apply(table)).toEqual([
+      ['区分', '人数（人）'],
+      ['20～24歳', '15'],
+      ['65歳以上', '40'],
+      ['2020年', '3'],
+      ['4月', '1'],
+    ]);
+
+    const asValues: Table = [
+      ['項目', '内容'],
+      ['年齢', '20～24歳'],
+      ['高齢者', '65歳以上'],
+      ['年', '2020年'],
+      ['月', '4月'],
+    ];
+    const valueFindings = detect(asValues);
+    expect(valueFindings.filter(f => f.metadata?.kind === 'unit' || f.metadata?.kind === 'mixed-unit')).toEqual([]);
+    expect(valueFindings[0]?.message).toBe('全角数字・桁区切り・単位の問題は見つかりませんでした。');
+    expect(asValues.map(row => row[1])).toEqual(['内容', '20～24歳', '65歳以上', '2020年', '4月']);
+  });
+
+  it('1.23456万 は shiftDecimal で 12345.6 になる', () => {
+    const table: Table = [
+      ['項目', '数量'],
+      ['A', '1.23456万'],
+      ['B', '3億'],
+      ['C', '-1.2万'],
+    ];
+
+    const unit = byKind(detect(table), 'unit');
+    expect(unit?.metadata).toMatchObject({
+      columns: [{ col: 1, mode: 'normalize', unit: '', header: '数量' }],
+    });
+    expect(unit?.fix?.apply(table)).toEqual([
+      ['項目', '数量'],
+      ['A', '12345.6'],
+      ['B', '300000000'],
+      ['C', '-12000'],
+    ]);
+    expect(unit?.fix?.apply(table)[1][1]).toBe('12345.6');
+  });
+
+  it('with-number-formats.csv の3つの修正は順番を変えても 6.4節例1 の最終形になる', () => {
+    const text = readFileSync(join(__dirname, 'fixtures/with-number-formats.csv'), 'utf8');
+    const { table } = parseCSVWithMeta(text);
+    const body = table.filter(row => row.some(cell => cell.trim() !== ''));
+
+    const expected: Table = [
+      ['コード', '市区町村', '人口（人）', '面積（km²）', '人口密度'],
+      ['01', '札幌市', '1973395', '1121.26', '1760'],
+      ['02', '函館市', '248989', '677.87', '367'],
+      ['03', '小樽市', '111299', '243.83', '456.5'],
+    ];
+
+    const unit = byKind(detect(body), 'unit');
+    expect(unit?.message).toBe(
+      '2 個の列で、セルの中に単位が書かれています（列 C「人」, 列 D「km²」）。単位を見出しに移すと、値を数値として扱えます。'
+    );
+    expect(unit?.fix?.description).toBe('単位を見出しに移す（列 C, D）');
+    expect(unit?.metadata).toEqual({
+      kind: 'unit',
+      columns: [
+        { col: 2, mode: 'strip', unit: '人', header: '人口（人）' },
+        { col: 3, mode: 'strip', unit: 'km²', header: '面積（km²）' },
+      ],
+    });
+
+    const unitOnly = applyKind(body, 'unit');
+    expect(unitOnly).toEqual([
+      ['コード', '市区町村', '人口（人）', '面積（km²）', '人口密度'],
+      ['01', '札幌市', '1,973,395', '1121.26', '1,760'],
+      ['02', '函館市', '２４８，９８９', '677.87', '３６７'],
+      ['03', '小樽市', '111,299', '243.83', '456.5'],
+    ]);
+    expect(unitOnly[1][3]).toBe('1121.26');
+    expect(unitOnly[0][3]).toBe('面積（km²）');
+    expect(unitOnly[0][3]).toContain('²');
+    expect(unitOnly[0][3]).not.toContain('km2');
+
+    const kinds = ['fullwidth', 'separator', 'unit'] as const;
+    const orders = kinds.flatMap((first, i) =>
+      kinds.filter((_, j) => j !== i).flatMap((second, k, rest) => {
+        const third = rest[k === 0 ? 1 : 0];
+        return [[first, second, third] as const];
+      })
+    );
+    expect(orders).toHaveLength(6);
+
+    for (const order of orders) {
+      let current = body;
+      for (const kind of order) {
+        current = applyKind(current, kind);
+      }
+      expect(current).toEqual(expected);
+      const after = detect(current);
+      expect(after.filter(f => f.severity === 'warning')).toEqual([]);
+      expect(after[0]?.message).toBe('全角数字・桁区切り・単位の問題は見つかりませんでした。');
+      expect(current.slice(1).map(row => row[0])).toEqual(['01', '02', '03']);
+    }
   });
 });
