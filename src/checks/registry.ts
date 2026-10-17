@@ -4,6 +4,7 @@ import { formatCheck } from './format';
 import { emptyCheck } from './empty';
 import { titleNotesCheck } from './titleNotes';
 import { multiHeaderCheck } from './multiHeader';
+import { totalsCheck } from './totals';
 
 export interface CheckpointDefinition {
   id: string;
@@ -47,7 +48,7 @@ export const checkpointRegistry: CheckpointDefinition[] = [
     id: 'totals',
     name: '合計・小計行',
     description: '集計行を検出します。分析時に二重カウントを防ぐため除去できます。',
-    check: null,
+    check: totalsCheck,
   },
   {
     id: 'symbols',
