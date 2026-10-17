@@ -332,6 +332,43 @@ describe('classifyColumns', () => {
     expect(kindsOf(table)).toEqual(['date', 'date', 'date', 'numeric']);
   });
 
+  it('rule 4: a wide-table fiscal-year header is numeric when values are numbers or symbols', () => {
+    const table: Table = [
+      ['都道府県', '平成30年度', '令和元年度'],
+      ['北海道', '1234', '100'],
+      ['青森県', 'x', '△10'],
+      ['秋田県', '500', '…'],
+    ];
+    expect(kindsOf(table)).toEqual(['text', 'numeric', 'numeric']);
+  });
+
+  it('rule 4: an all-symbol fiscal-year column is numeric when another column is numeric', () => {
+    const table: Table = [
+      ['都道府県', '平成30年度', '令和元年度'],
+      ['北海道', 'x', '100'],
+      ['青森県', '-', '200'],
+    ];
+    expect(kindsOf(table)).toEqual(['text', 'numeric', 'numeric']);
+  });
+
+  it('rule 4: a specific year header stays date when the values are dates', () => {
+    const table: Table = [
+      ['地域', '平成30年度', 'メモ'],
+      ['A市', '2018-04-01', 'a'],
+      ['B町', '2019-04-01', 'b'],
+    ];
+    expect(kindsOf(table)).toEqual(['text', 'date', 'text']);
+  });
+
+  it('rule 4: a generic date header stays date even when the suffix matches and values are years', () => {
+    const table: Table = [
+      ['地域', '実施年月日', '基準日付'],
+      ['A市', '2018', '2018-04-01'],
+      ['B町', '2019', '2019-04-01'],
+    ];
+    expect(kindsOf(table)).toEqual(['text', 'date', 'date']);
+  });
+
   it('rule 4: "年" inside a word (青年, 少年) does not make the column date', () => {
     const table: Table = [
       ['地域', '青年', '少年'],
@@ -478,5 +515,8 @@ describe('header patterns', () => {
     for (const header of ['青年', '少年', '平成30年', '令和元年', '年齢', '人口']) {
       expect(DATE_HEADER_RE.test(header)).toBe(false);
     }
+    // 末尾の「年度」には一致する。列の種類は値を見て classifyColumns が決める。
+    expect(DATE_HEADER_RE.test('平成30年度')).toBe(true);
+    expect(DATE_HEADER_RE.test('令和元年度')).toBe(true);
   });
 });

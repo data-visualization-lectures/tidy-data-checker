@@ -98,7 +98,22 @@ export function matchSymbol(raw: string): SymbolMatch | null {
 export type ColumnKind = 'numeric' | 'code' | 'date' | 'text' | 'empty';
 
 export const CODE_HEADER_RE = /(?:コード|code|番号|識別|郵便|〒|電話|品番|型番)|^(?:no\.?|id|tel)$/i;
-export const DATE_HEADER_RE = /^(?:年|年度|年次|年月|年月日|日付|日時|時点|期間|時期|調査年|調査年度|調査日|調査時点|西暦|西暦年|和暦|元号|date|year|period|fy|month)$|(?:年次|年度|年月日|年月|日付|時点)$/i;
+
+const DATE_HEADER_EXACT_SOURCE =
+  String.raw`^(?:年|年度|年次|年月|年月日|日付|日時|時点|期間|時期|調査年|調査年度|調査日|調査時点|西暦|西暦年|和暦|元号|date|year|period|fy|month)$`;
+const DATE_HEADER_SUFFIX_SOURCE = String.raw`(?:年次|年度|年月日|年月|日付|時点)$`;
+
+/** 見出し全体が日付の語、または末尾が「年度」「年月日」など */
+export const DATE_HEADER_RE = new RegExp(
+  `${DATE_HEADER_EXACT_SOURCE}|${DATE_HEADER_SUFFIX_SOURCE}`,
+  'i',
+);
+
+/** 見出し全体が「年」「調査年度」などの日付の語 */
+const DATE_HEADER_EXACT_RE = new RegExp(DATE_HEADER_EXACT_SOURCE, 'i');
+
+/** 平成30年度・令和元年度のように、特定の年を名指ししている */
+const SPECIFIC_YEAR_RE = /[0-9０-９]|明治|大正|昭和|平成|令和/;
 
 const ALL_DIGITS_RE = /^[0-9０-９]+$/;
 const LEADING_ZERO_CODE_RE = /^[0０][0-9０-９]/;
@@ -106,16 +121,13 @@ const NOTE_COLUMN_SUFFIX = '_注記';
 
 type ColumnVerdict = ColumnKind | 'all-missing';
 
-function classifyColumn(cells: string[], header: string): ColumnVerdict {
-  if (cells.length === 0) return 'empty';
-  if (CODE_HEADER_RE.test(header)) return 'code';
+interface ColumnStats {
+  numberLike: number;
+  symbols: number;
+  missingOrDash: number;
+}
 
-  const trimmed = cells.map(cell => cell.trim());
-  if (trimmed.every(cell => ALL_DIGITS_RE.test(cell)) && trimmed.some(cell => LEADING_ZERO_CODE_RE.test(cell))) {
-    return 'code';
-  }
-  if (DATE_HEADER_RE.test(header)) return 'date';
-
+function columnStats(cells: string[]): ColumnStats {
   let numberLike = 0;
   let symbols = 0;
   let missingOrDash = 0;
@@ -133,9 +145,35 @@ function classifyColumn(cells: string[], header: string): ColumnVerdict {
       if (symbol.kind !== 'unknown') missingOrDash++;
     }
   }
+  return { numberLike, symbols, missingOrDash };
+}
 
-  if (numberLike > 0 && (numberLike + symbols) * 5 >= cells.length * 4) return 'numeric';
-  if (missingOrDash === cells.length) return 'all-missing';
+function classifyColumn(cells: string[], header: string): ColumnVerdict {
+  if (cells.length === 0) return 'empty';
+  if (CODE_HEADER_RE.test(header)) return 'code';
+
+  const trimmed = cells.map(cell => cell.trim());
+  if (trimmed.every(cell => ALL_DIGITS_RE.test(cell)) && trimmed.some(cell => LEADING_ZERO_CODE_RE.test(cell))) {
+    return 'code';
+  }
+
+  const stats = columnStats(cells);
+  const mostlyNumeric = stats.numberLike > 0 && (stats.numberLike + stats.symbols) * 5 >= cells.length * 4;
+  const allMissing = stats.missingOrDash === cells.length;
+
+  if (DATE_HEADER_RE.test(header)) {
+    // 横持ちの「平成30年度」は末尾の「年度」だけで日付列になる。
+    // 値が数値や記号なら見出しではなく値で数値列と決める。
+    // 「年」「調査年度」のように見出し全体が日付の語なら、値が 2018 でも日付列のまま。
+    const wideYearMeasure =
+      !DATE_HEADER_EXACT_RE.test(header) &&
+      SPECIFIC_YEAR_RE.test(header) &&
+      (mostlyNumeric || allMissing);
+    if (!wideYearMeasure) return 'date';
+  }
+
+  if (mostlyNumeric) return 'numeric';
+  if (allMissing) return 'all-missing';
   return 'text';
 }
 
