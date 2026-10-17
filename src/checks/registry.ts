@@ -6,6 +6,7 @@ import { titleNotesCheck } from './titleNotes';
 import { multiHeaderCheck } from './multiHeader';
 import { totalsCheck } from './totals';
 import { symbolsCheck } from './symbols';
+import { formatNumberCheck } from './formatNumber';
 
 export interface CheckpointDefinition {
   id: string;
@@ -61,7 +62,7 @@ export const checkpointRegistry: CheckpointDefinition[] = [
     id: 'format-number',
     name: '全角数字・桁区切り・単位',
     description: '全角数字→半角、桁区切り除去、単位分離で数値として扱えるようにします。',
-    check: null,
+    check: formatNumberCheck,
   },
   {
     id: 'wareki',
