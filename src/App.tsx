@@ -119,7 +119,7 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Tidy Data Checker</h1>
+        <h1>整頓データチェッカー</h1>
         <p className="app-subtitle">CSV/Excel整然データ変換ツール</p>
       </header>
 
