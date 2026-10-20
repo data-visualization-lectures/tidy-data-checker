@@ -20,6 +20,9 @@ export function FixPreview({
   const currentMaxCols = Math.max(0, ...currentTable.map(r => r.length));
   const previewMaxCols = Math.max(0, ...previewTable.map(r => r.length));
   const colDiff = currentMaxCols - previewMaxCols;
+  const deletedCols = finding.fix?.deletedCols;
+  const highlightAfter =
+    rowDiff <= 0 && !(deletedCols !== undefined && deletedCols.length > 0);
 
   return (
     <div className="fix-preview-overlay">
@@ -29,6 +32,7 @@ export function FixPreview({
           <p className="fix-description">{finding.fix?.description}</p>
         </div>
 
+        <style>{`.fix-preview-after .data-grid .data-cell.highlighted { background: var(--color-highlight); }`}</style>
         <div className="fix-preview-comparison">
           <div className="fix-preview-before">
             <h4>修正前</h4>
@@ -55,7 +59,11 @@ export function FixPreview({
                 </span>
               )}
             </div>
-            <DataGrid table={previewTable} previewTable={previewTable} />
+            <DataGrid
+              table={previewTable}
+              previewTable={previewTable}
+              highlightRanges={highlightAfter ? finding.ranges : undefined}
+            />
           </div>
         </div>
 
