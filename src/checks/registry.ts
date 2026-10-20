@@ -50,13 +50,13 @@ export const checkpointRegistry: CheckpointDefinition[] = [
   {
     id: 'totals',
     name: '合計・小計行',
-    description: '集計行を検出します。分析時に二重カウントを防ぐため除去できます。',
+    description: '合計・小計の行や合計列を検出します。分析時に二重カウントを防ぐため除去できます。',
     check: totalsCheck,
   },
   {
     id: 'symbols',
     name: '値の中の記号',
-    description: '※、-、…、x、秘匿などの記号を検出し、欠損値として処理できます。',
+    description: '※、-、…、x、秘匿、△などの記号を検出し、欠損値やマイナスの数値として処理できます。',
     check: symbolsCheck,
   },
   {
