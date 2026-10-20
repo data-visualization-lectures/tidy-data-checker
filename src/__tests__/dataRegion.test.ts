@@ -122,6 +122,23 @@ describe('getDataRegion', () => {
     expect(dataRowsOf([['都道府県', '人口']])).toEqual([]);
   });
 
+  it('should keep a row of "-" right below the header as a data row (5.4 example 4)', () => {
+    const table: Table = [
+      ['都道府県', '事業所数'],
+      ['青森県', '-'],
+      ['岩手県', '567'],
+    ];
+
+    expect(getDataRegion(table)).toEqual({
+      headerRows: [0],
+      headerRow: 0,
+      firstDataRow: 1,
+      lastDataRow: 2,
+      maxCols: 2,
+    });
+    expect(dataRowsOf(table)).toEqual([1, 2]);
+  });
+
   it('should not depend on merged cell information', () => {
     const table: Table = [
       ['地域', '都道府県', '人口'],

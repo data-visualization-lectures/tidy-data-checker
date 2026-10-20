@@ -477,6 +477,37 @@ describe('symbolsCheck', () => {
     expect(symbolsCheck.detect(mixedAlt.fix?.apply(mixed) ?? [], ctx()).find(f => f.metadata?.kind === 'dash')).toBeUndefined();
   });
 
+  it('5.4 example 4: a "-" row right below the header gets the main fix and the zero alternative', () => {
+    const table: Table = [
+      ['都道府県', '事業所数'],
+      ['青森県', '-'],
+      ['岩手県', '567'],
+    ];
+    const findings = symbolsCheck.detect(table, ctx());
+    const dash = byKind(findings, 'dash');
+    const alt = byKind(findings, 'dash-to-zero');
+
+    expect(dash.severity).toBe('warning');
+    expect(dash.ranges).toEqual([{ startRow: 1, startCol: 1, endRow: 1, endCol: 1 }]);
+    expect(dash.fix?.description).toBe('「-」を空欄にする（1 セル）');
+    expect(dash.fix?.apply(table)).toEqual([
+      ['都道府県', '事業所数'],
+      ['青森県', ''],
+      ['岩手県', '567'],
+    ]);
+
+    expect(alt.severity).toBe('info');
+    expect(alt.message).toBe(
+      '別の方法：「-」を 0 にすることもできます。「該当なし＝0」とみなせる資料のときに使います。',
+    );
+    expect(alt.fix?.description).toBe('「-」を 0 にする（1 セル）');
+    expect(alt.fix?.apply(table)).toEqual([
+      ['都道府県', '事業所数'],
+      ['青森県', '0'],
+      ['岩手県', '567'],
+    ]);
+  });
+
   it('15. does not count info alternatives in the checklist total', () => {
     const findings = symbolsCheck.detect(loadSymbolsFixture(), ctx());
     const alternatives = findings.filter(f => f.metadata?.kind === 'dash-to-zero' || f.metadata?.kind === 'flag-columns');

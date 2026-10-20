@@ -10,6 +10,7 @@ import {
   DATE_HEADER_RE,
   type ParsedNumber,
 } from '../utils/values';
+import { isValueCell } from '../utils/cellValue';
 import { getDataRegion } from '../utils/dataRegion';
 import type { Table } from '../types';
 
@@ -229,6 +230,22 @@ describe('matchSymbol', () => {
     expect(matchSymbol('２４８，９８９人')).toBeNull();
     expect(matchSymbol('北海道')).toBeNull();
   });
+});
+
+describe('isValueCell', () => {
+  it.each(['7', '1,234', '１２３', '-1.5', '-', '－', 'x', '…', '***', '△1.5', '1,234※', '123p'])(
+    '%s は値',
+    raw => {
+      expect(isValueCell(raw)).toBe(true);
+    },
+  );
+
+  it.each(['', '　', '北海道', '男', '1人世帯', '15歳', '1.2万', '2020年', '(人)', '65歳以上', '<5', '△'])(
+    '%s は値ではない',
+    raw => {
+      expect(isValueCell(raw)).toBe(false);
+    },
+  );
 });
 
 describe('classifyColumns', () => {

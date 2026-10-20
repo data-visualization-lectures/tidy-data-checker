@@ -1,5 +1,5 @@
-// セル1つだけを見る判定。titleNotes.ts と multiHeader.ts からも使うので、
-// dataRegion.ts（それらを読み込む）には依存させない。
+// セル1つだけを見る判定。dataRegion.ts が読み込む titleNotes.ts・multiHeader.ts からも
+// 循環せずに使えるよう、このファイルはほかのモジュールを読み込まない。
 
 const HALF_WIDTH_SOURCE_RE = /[\uFF01-\uFF5E\u3000\u2212\u2010]/g;
 
@@ -93,4 +93,15 @@ export function matchSymbol(raw: string): SymbolMatch | null {
 
   if (UNKNOWN_RE.test(half)) return { kind: 'unknown', replacement: raw };
   return null;
+}
+
+/**
+ * 統計表の値のセル：単位の付かない数値（全角も可）か、数値の代わりに入る記号（x・…・-・△1.5・1,234※）。
+ * 単位付き（1人世帯・15歳）と unknown（(人)・65歳以上）は見出しの語にもなるので値に含めない。
+ */
+export function isValueCell(raw: string): boolean {
+  const parsed = parseNumericCell(raw);
+  if (parsed && parsed.unit === '' && parsed.multiplier === '') return true;
+  const symbol = matchSymbol(raw);
+  return symbol !== null && symbol.kind !== 'unknown';
 }
