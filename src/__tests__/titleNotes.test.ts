@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { titleNotesCheck } from '../checks/titleNotes';
+import { titleNotesCheck, classifyRow } from '../checks/titleNotes';
 import { multiHeaderCheck } from '../checks/multiHeader';
 import { parseCSV } from '../utils/csv';
 import { parseExcelSheet } from '../utils/excel';
@@ -286,6 +286,40 @@ describe('titleNotesCheck', () => {
       const headerFinding = headers.find(f => f.message.includes('2行の多段ヘッダー'));
       expect(headerFinding).toBeDefined();
       expect(headerFinding?.message).toContain('人口');
+    });
+  });
+
+  describe('2-column data rows that start with a date (7.4 example 3)', () => {
+    const EXAMPLE_3: Table = [
+      ['調査日', '件数'],
+      ['平成31年4月30日', '7'],
+      ['平成31年5月1日', '8'],
+    ];
+
+    it('should classify a row with a value cell as data, and a row without values as a title', () => {
+      expect(classifyRow(['平成31年4月30日', '7']).type).toBe('data');
+      expect(classifyRow(['2023年度', '-']).type).toBe('data');
+      expect(classifyRow(['平成30年 事業所調査', '']).type).toBe('title');
+      expect(classifyRow(['表1 事業所数', '令和5年']).type).toBe('title');
+    });
+
+    it('should not report the data rows as title or note rows', () => {
+      const findings = titleNotesCheck.detect(EXAMPLE_3, createContext());
+
+      expect(findings).toEqual([
+        expect.objectContaining({ severity: 'info', message: 'タイトル行・注記行は検出されませんでした。' }),
+      ]);
+    });
+
+    it('should still detect a title row above the table and no note rows', () => {
+      const table: Table = [['平成30年 事業所調査', ''], ...EXAMPLE_3];
+
+      const findings = titleNotesCheck.detect(table, createContext());
+      const titleFinding = findings.find(f => f.message.includes('タイトル行'));
+
+      expect(findings.some(f => f.message.includes('注記行'))).toBe(false);
+      expect(titleFinding?.fix?.deletedRows).toEqual([0]);
+      expect(titleFinding?.fix?.apply(table)).toEqual(EXAMPLE_3);
     });
   });
 

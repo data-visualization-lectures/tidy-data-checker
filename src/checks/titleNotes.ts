@@ -1,4 +1,5 @@
 import type { Check, Finding, Table, CheckContext, Fix, CellRange } from '../types';
+import { isValueCell } from '../utils/cellValue';
 
 const TITLE_PATTERNS = [
   /^[　\s]*表\d+/,
@@ -54,7 +55,8 @@ export function classifyRow(row: string[]): RowClassification {
     }
   }
 
-  if (nonEmptyCells.length <= 2) {
+  // 「平成31年4月30日, 7」のような2列の表のデータ行もここに来るので、値のセルがある行はタイトルにしない
+  if (nonEmptyCells.length <= 2 && !nonEmptyCells.some(isValueCell)) {
     for (const pattern of TITLE_PATTERNS) {
       if (pattern.test(firstCell) || pattern.test(fullRow)) {
         return { type: 'title', content: fullRow };

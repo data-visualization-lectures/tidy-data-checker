@@ -285,7 +285,6 @@ describe('warekiCheck', () => {
   });
 
   it('8. 改元日をまたぐ表記・最終年超えは変換したうえで info が出る', () => {
-    // 2列だと「平成…年」の行が既存のタイトル判定でデータ領域の外になるため、メモ列を足す。
     const table: Table = [
       ['調査日', '件数', 'メモ'],
       ['平成31年4月30日', '7', 'a'],
@@ -312,6 +311,35 @@ describe('warekiCheck', () => {
       kind: 'boundary',
       examples: ['平成31年5月1日', '平成32年'],
     });
+  });
+
+  it('7.4節 例3：2列の表でも「平成…年」の行を変換し、改元日をまたぐ info を出す', () => {
+    const table: Table = [
+      ['調査日', '件数'],
+      ['平成31年4月30日', '7'],
+      ['平成31年5月1日', '8'],
+    ];
+
+    const findings = detect(table);
+    const era = byKind(findings, 'era-cells');
+    const boundary = byKind(findings, 'boundary');
+
+    expect(warnings(findings).map(f => f.metadata?.kind)).toEqual(['era-cells']);
+    expect(era?.message).toBe(
+      '2 個のセルに和暦の日付があります（例: 「平成31年4月30日」→「2019-04-30」）。西暦にそろえると、並べ替えやグラフの時間軸が正しく扱えます。',
+    );
+    expect(era?.fix?.description).toBe('和暦を西暦に変換（2 セル）');
+    expect(era?.fix?.apply(table)).toEqual([
+      ['調査日', '件数'],
+      ['2019-04-30', '7'],
+      ['2019-05-01', '8'],
+    ]);
+    expect(boundary?.severity).toBe('info');
+    expect(boundary?.fix).toBeUndefined();
+    expect(boundary?.message).toBe(
+      '元号の切り替えをまたぐ表記があります（例: 「平成31年5月1日」）。西暦では正しく変換されますが、元の資料を確認しておくと安心です。',
+    );
+    expect(boundary?.metadata).toEqual({ kind: 'boundary', examples: ['平成31年5月1日'] });
   });
 
   it('9. 変換できない表記は info が出て、表は変わらない', () => {
