@@ -118,6 +118,50 @@ describe('multiHeaderCheck', () => {
     });
   });
 
+  describe('rows of symbols right below the header', () => {
+    it('should not treat a data row of "-" as a second header row (5.4 example 4)', () => {
+      const table: Table = [
+        ['都道府県', '事業所数'],
+        ['青森県', '-'],
+        ['岩手県', '567'],
+      ];
+
+      const findings = multiHeaderCheck.detect(table, createContext({ fileName: 'test.csv', encoding: 'UTF-8' }));
+
+      expect(findings.some(f => f.message.includes('多段ヘッダー') && f.severity === 'warning')).toBe(false);
+      expect(findings).toEqual([
+        expect.objectContaining({ severity: 'info', message: '多段ヘッダー・セル結合は検出されませんでした。' }),
+      ]);
+    });
+
+    it('should not treat rows of x, …, △ and ※ values as header rows', () => {
+      const table: Table = [
+        ['都道府県', '事業所数', '従業者数', '前年比'],
+        ['青森県', 'x', '…', '△1.5'],
+        ['岩手県', '567', '8901', '0.3'],
+      ];
+
+      const findings = multiHeaderCheck.detect(table, createContext());
+
+      expect(findings.some(f => f.message.includes('多段ヘッダー') && f.severity === 'warning')).toBe(false);
+    });
+
+    it('should keep a second header row whose labels include 不詳', () => {
+      const table: Table = [
+        ['', '年齢', '', ''],
+        ['都道府県', '20歳未満', '20歳以上', '不詳'],
+        ['北海道', '100', '200', '3'],
+        ['青森県', '50', '60', '1'],
+      ];
+
+      const findings = multiHeaderCheck.detect(table, createContext());
+      const headerFinding = findings.find(f => f.message.includes('2行の多段ヘッダー'));
+
+      expect(headerFinding).toBeDefined();
+      expect(headerFinding?.fix?.apply(table)[0]).toEqual(['都道府県', '年齢_20歳未満', '20歳以上', '不詳']);
+    });
+  });
+
   describe('no issues', () => {
     it('should report no issues for simple single-row header', () => {
       const table: Table = [

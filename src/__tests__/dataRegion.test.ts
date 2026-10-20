@@ -93,7 +93,7 @@ describe('getDataRegion', () => {
       ['2024年度', '130', '確定'],
     ];
 
-    expect(classifyRow(table[2]).type).toBe('title');
+    expect(classifyRow(table[2]).type).toBe('data');
     expect(dataRowsOf(table)).toEqual([1, 2, 3]);
   });
 
@@ -120,6 +120,40 @@ describe('getDataRegion', () => {
       maxCols: 0,
     });
     expect(dataRowsOf([['都道府県', '人口']])).toEqual([]);
+  });
+
+  it('should keep a row of "-" right below the header as a data row (5.4 example 4)', () => {
+    const table: Table = [
+      ['都道府県', '事業所数'],
+      ['青森県', '-'],
+      ['岩手県', '567'],
+    ];
+
+    expect(getDataRegion(table)).toEqual({
+      headerRows: [0],
+      headerRow: 0,
+      firstDataRow: 1,
+      lastDataRow: 2,
+      maxCols: 2,
+    });
+    expect(dataRowsOf(table)).toEqual([1, 2]);
+  });
+
+  it('should keep 2-column rows that start with 平成…年 as data rows (7.4 example 3)', () => {
+    const table: Table = [
+      ['調査日', '件数'],
+      ['平成31年4月30日', '7'],
+      ['平成31年5月1日', '8'],
+    ];
+
+    expect(getDataRegion(table)).toEqual({
+      headerRows: [0],
+      headerRow: 0,
+      firstDataRow: 1,
+      lastDataRow: 2,
+      maxCols: 2,
+    });
+    expect(dataRowsOf(table)).toEqual([1, 2]);
   });
 
   it('should not depend on merged cell information', () => {

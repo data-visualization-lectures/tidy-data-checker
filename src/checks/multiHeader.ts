@@ -1,4 +1,5 @@
 import type { Check, Finding, Table, CheckContext, Fix, CellRange, MergedCell } from '../types';
+import { isValueCell } from '../utils/cellValue';
 
 interface HeaderAnalysis {
   headerRowCount: number;
@@ -8,17 +9,36 @@ interface HeaderAnalysis {
   headerRows: number[];
 }
 
+const PLAIN_NUMBER_RE = /^\d+([,，]\d{3})*(\.\d+)?$/;
+
+/**
+ * 次の行で数値が入っている列に、値（-・x・△1.5 など）しかない行はデータ行。
+ * 見出しの行なら、それらの列のどこかに見出しの語（男、20歳未満 など）があるので、
+ * 「不詳」のように記号と同じ語が混ざっていても見出しのままになる。
+ */
+function hasOnlyValuesAboveNumbers(row: string[], nextRow: string[]): boolean {
+  let values = 0;
+  for (let col = 0; col < nextRow.length; col++) {
+    if (!PLAIN_NUMBER_RE.test(nextRow[col].trim())) continue;
+    const cell = row[col] ?? '';
+    if (cell.trim() === '') continue;
+    if (!isValueCell(cell)) return false;
+    values++;
+  }
+  return values > 0;
+}
+
 function isLikelyHeaderRow(row: string[], rowIndex: number, table: Table): boolean {
   const nonEmptyCells = row.filter(cell => cell.trim() !== '');
   if (nonEmptyCells.length === 0) return false;
 
-  const hasNumbers = row.some(cell => /^\d+([,，]\d{3})*(\.\d+)?$/.test(cell.trim()));
+  const hasNumbers = row.some(cell => PLAIN_NUMBER_RE.test(cell.trim()));
   if (hasNumbers && rowIndex > 0) return false;
 
   const nextRow = table[rowIndex + 1];
   if (nextRow) {
-    const nextHasNumbers = nextRow.some(cell => /^\d+([,，]\d{3})*(\.\d+)?$/.test(cell.trim()));
-    if (nextHasNumbers) return true;
+    const nextHasNumbers = nextRow.some(cell => PLAIN_NUMBER_RE.test(cell.trim()));
+    if (nextHasNumbers) return rowIndex === 0 || !hasOnlyValuesAboveNumbers(row, nextRow);
   }
 
   return rowIndex === 0;
